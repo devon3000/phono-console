@@ -4,6 +4,7 @@ import asyncio
 
 from .events import LoggingEventSink
 from .interfaces import EventSink
+from .levels import LevelSession, StereoLevel, analyze_s16le_stereo
 from .pcm import rms_dbfs_s16le
 
 
@@ -29,6 +30,8 @@ class ArecordLevelMonitor:
         self.channels = channels
         self.window_ms = window_ms
         self._process: asyncio.subprocess.Process | None = None
+        self.latest: StereoLevel | None = None
+        self.session = LevelSession()
         frames = max(1, sample_rate * window_ms // 1000)
         self._window_bytes = frames * channels * 2
 
@@ -57,7 +60,7 @@ class ArecordLevelMonitor:
             raise CaptureUnavailable(str(exc)) from exc
         await self.events.emit("capture_started", {"device": self.device})
 
-    async def level_dbfs(self) -> float:
+    async def read_pcm(self) -> bytes:
         if self._process is None or self._process.returncode is not None:
             if self._process is not None:
                 await self.events.emit(
@@ -76,6 +79,15 @@ class ArecordLevelMonitor:
                 {"device": self.device, "returncode": returncode},
             )
             raise CaptureUnavailable("ALSA capture ended unexpectedly") from exc
+        if self.channels == 2:
+            self.latest = analyze_s16le_stereo(pcm)
+            self.session.update(self.latest)
+        return pcm
+
+    async def level_dbfs(self) -> float:
+        pcm = await self.read_pcm()
+        if self.latest is not None:
+            return max(self.latest.left.rms_dbfs, self.latest.right.rms_dbfs)
         return rms_dbfs_s16le(pcm)
 
     async def close(self) -> None:
@@ -90,4 +102,3 @@ class ArecordLevelMonitor:
             process.kill()
             await process.wait()
         await self.events.emit("capture_stopped", {"device": self.device})
-
