@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Software audio router for local and whole-house vinyl playback"
 requires-python = ">=3.11"
 dependencies = [
+  "aiohttp>=3.11,<4",
   "aiosendspin>=9.1,<10",
   "music-assistant-client>=1.5,<2",
 ]
