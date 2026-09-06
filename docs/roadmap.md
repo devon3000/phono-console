@@ -8,11 +8,16 @@
 - Measure round-trip latency; acceptance target is below 50 ms.
 - Measure idle/noise levels to set phono detection thresholds.
 
+Use `phono-console diagnose` for the initial device/tool report. The implemented
+`ArecordLevelMonitor` reads 48 kHz, 16-bit PCM, reports RMS dBFS, and reopens the
+capture path after failure.
+
 ## 2. Automatic router
 
 - Implement audio-level detection with attack, release, and hysteresis.
 - Implement UFO202 loopback lifecycle and pop-free transitions.
 - Observe Music Assistant console-player state.
+- Maintain the authenticated MA websocket and reconnect after connection loss.
 - Forward structured controller events to the MA-side integration logger.
 - Enforce source priority and automatic resume behavior.
 - Persist configuration, not transient playback state.
