@@ -46,6 +46,14 @@ phono-console diagnose
 It reports ALSA capture/playback devices and availability of the loopback and
 Sendspin client commands.
 
+The embedded control API is designed for Home Assistant and defaults to
+loopback-only access. With `PHONO_CONSOLE_API_TOKEN` set, requests use a bearer
+token. Its initial endpoints are:
+
+- `GET /health`
+- `GET /v1/status`
+- `PUT /v1/whole-house` with `{\"enabled\": true|false}`
+
 Whole-house capture deliberately depends on native Sendspin source-role support.
 The project will not add a temporary HTTP-radio or transcoding workaround while
 that support matures.
