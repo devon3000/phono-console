@@ -6,6 +6,7 @@ from phono_console.controller import Controller
 from phono_console.policy import Route
 from phono_console.simulation import (
     SimulatedAudioRouter,
+    SimulatedEventSink,
     SimulatedLevelMonitor,
     SimulatedMusicAssistant,
 )
@@ -21,7 +22,8 @@ def test_controller_applies_only_changed_routes() -> None:
         level = SimulatedLevelMonitor()
         ma = SimulatedMusicAssistant()
         router = SimulatedAudioRouter()
-        subject = Controller(config(), level, ma, router)
+        events = SimulatedEventSink()
+        subject = Controller(config(), level, ma, router, events)
 
         await subject.tick(now=0)
         await subject.tick(now=1)
@@ -35,5 +37,10 @@ def test_controller_applies_only_changed_routes() -> None:
         ma.playing = True
         await subject.tick(now=3)
         assert router.routes[-1] is Route.MA_PLAYBACK
+        assert [event for event, _ in events.events] == [
+            "route_changed",
+            "route_changed",
+            "route_changed",
+        ]
 
     asyncio.run(scenario())
