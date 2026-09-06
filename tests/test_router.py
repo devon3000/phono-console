@@ -7,20 +7,24 @@ from phono_console.simulation import SimulatedEventSink
 from test_processes import FakeLauncher
 
 
-def test_router_exclusively_switches_capture_consumers() -> None:
+def test_router_runs_loopback_only_for_local_phono() -> None:
     async def scenario() -> None:
         events = SimulatedEventSink()
         loop = ManagedProcess(ProcessSpec("loopback", ("loop",)), FakeLauncher(), events)
-        source = ManagedProcess(ProcessSpec("source", ("source",)), FakeLauncher(), events)
-        router = ProcessAudioRouter(loop, source)
+        router = ProcessAudioRouter(loop)
 
         await router.apply(Route.LOCAL_PHONO)
-        assert loop.running and not source.running
+        assert loop.running
 
         await router.apply(Route.WHOLE_HOUSE_PHONO)
-        assert source.running and not loop.running
+        assert not loop.running
 
+        await router.apply(Route.LOCAL_PHONO)
         await router.apply(Route.MA_PLAYBACK)
-        assert not source.running and not loop.running
+        assert not loop.running
+
+        await router.apply(Route.LOCAL_PHONO)
+        await router.close()
+        assert not loop.running
 
     asyncio.run(scenario())

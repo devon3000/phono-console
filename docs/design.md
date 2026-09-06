@@ -23,9 +23,12 @@
 
 The console is a Sendspin player for synchronized Music Assistant playback.
 Whole-house vinyl uses Sendspin's source role to expose the UFO202 capture as a
-native Music Assistant audio source. Source publication remains disabled until
-the compatible Sendspin source client and MA provider are available and pass
-bench testing.
+native Music Assistant audio source. The daemon runs an in-process source
+client (aiosendspin) with a persistent identity and pairing store; the Music
+Assistant `sendspin_source` plugin commands when streaming starts and stops.
+Whole-house playback is normally initiated from Music Assistant or Home
+Assistant; the daemon's API request plays the source on the configured
+whole-house players as a convenience.
 
 This is an intentional dependency, not a temporary gap to bridge with an HTTP
 radio stream, FIFO transcoder, or unsynchronized local monitor. Waiting keeps
@@ -74,7 +77,10 @@ UFO202 exposes distinct capture and playback endpoints over USB; the software
 graph connects them only according to the active state. Whole-house mode sends
 capture upstream while local playback consumes the returned stream.
 
-The runtime owns two mutually exclusive capture-consuming processes: the local
-loopback and the Sendspin source client. Route transitions stop the old
-consumer before starting the new one. Music Assistant playback is produced by
-the MA player client and therefore requires neither capture process.
+The shared dsnoop capture lets the level monitor, the local loopback, and the
+Sendspin source client read the UFO202 simultaneously without contending for
+the hardware. The routing decision governs local output only: the loopback
+runs solely in `local_phono`. The source client streams capture upstream only
+while the Music Assistant provider commands it, and Music Assistant playback
+is produced by the separate Sendspin player service, so the returned stream
+never re-enters the capture path.

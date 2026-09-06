@@ -1,0 +1,24 @@
+[Unit]
+Description=Phono Console Sendspin player
+Wants=network-online.target sound.target
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/phono-console/player.env
+ExecStart=/opt/phono-console/player-venv/bin/sendspin daemon \
+  --url ${PHONO_PLAYER_URL} \
+  --name ${PHONO_PLAYER_NAME} \
+  --id phono-console \
+  --audio-device ${PHONO_PLAYER_AUDIO_DEVICE} \
+  --settings-dir /var/lib/phono-console/sendspin \
+  --disable-mpris
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+StateDirectory=phono-console/sendspin
+
+[Install]
+WantedBy=multi-user.target

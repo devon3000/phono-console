@@ -21,12 +21,18 @@ class StateStore:
     def __init__(self, max_events: int = 100) -> None:
         self.status: Status | None = None
         self.whole_house_requested = False
+        self.sendspin_source: dict[str, object] = {}
         self.events: deque[RecordedEvent] = deque(maxlen=max_events)
         self.changed = asyncio.Condition()
 
     async def set_status(self, status: Status) -> None:
         async with self.changed:
             self.status = status
+            self.changed.notify_all()
+
+    async def set_source_state(self, source: dict[str, object]) -> None:
+        async with self.changed:
+            self.sendspin_source = dict(source)
             self.changed.notify_all()
 
     async def request_whole_house(self, requested: bool) -> None:
@@ -49,6 +55,7 @@ class StateStore:
         return {
             "status": status,
             "whole_house_requested": self.whole_house_requested,
+            "sendspin_source": dict(self.sendspin_source),
             "events": [asdict(event) for event in self.events],
         }
 

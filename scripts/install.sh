@@ -5,7 +5,9 @@ APP_DIR="/opt/phono-console"
 CONFIG_DIR="/etc/phono-console"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
 ENV_FILE="$CONFIG_DIR/environment"
+PLAYER_ENV_FILE="$CONFIG_DIR/player.env"
 SERVICE_FILE="/etc/systemd/system/phono-console.service"
+PLAYER_SERVICE_FILE="/etc/systemd/system/phono-console-player.service"
 ALSA_FILE="/etc/alsa/conf.d/99-phono-console.conf"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -51,6 +53,13 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install "$SOURCE_DIR"
 ln -sfn "$APP_DIR/venv/bin/phono-console" /usr/local/bin/phono-console
 
+# The sendspin player pins aiosendspin 6.x while the routing daemon's source
+# client needs 9.x, so the player lives in its own venv.
+python3 -m venv "$APP_DIR/player-venv"
+"$APP_DIR/player-venv/bin/pip" install --upgrade pip
+"$APP_DIR/player-venv/bin/pip" install "sendspin>=7.5,<8"
+ln -sfn "$APP_DIR/player-venv/bin/sendspin" /usr/local/bin/sendspin
+
 card="$(detect_ufo_card)"
 if [[ -n "$card" ]]; then
   echo "Detected UFO202-compatible USB audio card $card."
@@ -95,6 +104,7 @@ playback_device="$(prompt "ALSA playback device" "$default_playback_device")"
 ma_url="$(prompt "Music Assistant URL" "http://music-assistant.local")"
 ma_player="$(prompt "Music Assistant console player" "Phono Console")"
 vinyl_source="$(prompt "Music Assistant vinyl source" "Console Vinyl")"
+whole_house_group="$(prompt "Whole-house player group" "Downstairs")"
 sendspin_url="$(prompt "Sendspin server URL" "ws://music-assistant.local:8927/sendspin")"
 
 if [[ -e "$CONFIG_FILE" ]]; then
@@ -123,12 +133,14 @@ base_url = "$(toml_escape "$ma_url")"
 console_player = "$(toml_escape "$ma_player")"
 vinyl_source = "$(toml_escape "$vinyl_source")"
 token_env = "PHONO_CONSOLE_MA_TOKEN"
+whole_house_players = ["$(toml_escape "$whole_house_group")"]
 
 [sendspin]
 server_url = "$(toml_escape "$sendspin_url")"
 player_name = "$(toml_escape "$ma_player")"
 source_name = "$(toml_escape "$vinyl_source")"
-source_enabled = false
+source_enabled = true
+state_dir = "/var/lib/phono-console/source"
 
 [runtime]
 poll_interval_ms = 100
@@ -137,6 +149,15 @@ api_port = 8765
 api_token_env = "PHONO_CONSOLE_API_TOKEN"
 EOF
 chmod 0640 "$CONFIG_FILE"
+
+# The Sendspin player unit reads these values; regenerated on every run like
+# the main configuration.
+cat >"$PLAYER_ENV_FILE" <<EOF
+PHONO_PLAYER_URL="$(toml_escape "$sendspin_url")"
+PHONO_PLAYER_NAME="$(toml_escape "$ma_player")"
+PHONO_PLAYER_AUDIO_DEVICE="$(toml_escape "$playback_device")"
+EOF
+chmod 0644 "$PLAYER_ENV_FILE"
 
 if [[ ! -e "$ENV_FILE" ]]; then
   cat >"$ENV_FILE" <<'EOF'
@@ -148,6 +169,7 @@ EOF
 fi
 
 install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
+install -m 0644 "$SOURCE_DIR/systemd/phono-console-player.service" "$PLAYER_SERVICE_FILE"
 systemctl daemon-reload
 
 echo
@@ -157,12 +179,14 @@ echo
 echo "Probing audio hardware (a missing UFO202 is okay before installation day)..."
 phono-console diagnose || true
 if [[ -n "$card" ]]; then
-  systemctl enable --now phono-console.service
-  echo "Service status: systemctl status phono-console --no-pager"
-  echo "Live logs:      journalctl -u phono-console -f"
+  systemctl enable --now phono-console.service phono-console-player.service
+  echo "Router status:  systemctl status phono-console --no-pager"
+  echo "Player status:  systemctl status phono-console-player --no-pager"
+  echo "Live logs:      journalctl -u phono-console -u phono-console-player -f"
 else
-  systemctl disable phono-console.service >/dev/null 2>&1 || true
-  echo "Service installed but not enabled because the UFO202 was not detected."
+  systemctl disable phono-console.service phono-console-player.service \
+    >/dev/null 2>&1 || true
+  echo "Services installed but not enabled because the UFO202 was not detected."
 fi
 echo
 echo "Setup complete."

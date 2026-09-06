@@ -29,6 +29,7 @@ class MusicAssistantConfig:
     console_player: str
     vinyl_source: str
     token_env: str = "PHONO_CONSOLE_MA_TOKEN"
+    whole_house_players: tuple[str, ...] = ("Downstairs",)
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class SendspinConfig:
     player_name: str
     source_name: str
     source_enabled: bool = False
+    state_dir: str = "/var/lib/phono-console/source"
 
 
 @dataclass(frozen=True)
@@ -95,12 +97,19 @@ def load_config(path: Path) -> Config:
             console_player=str(_required(ma, "console_player", "music_assistant")),
             vinyl_source=str(_required(ma, "vinyl_source", "music_assistant")),
             token_env=str(ma.get("token_env", "PHONO_CONSOLE_MA_TOKEN")),
+            whole_house_players=tuple(
+                str(player)
+                for player in ma.get("whole_house_players", ["Downstairs"])
+            ),
         ),
         sendspin=SendspinConfig(
             server_url=str(_required(sendspin, "server_url", "sendspin")),
             player_name=str(_required(sendspin, "player_name", "sendspin")),
             source_name=str(_required(sendspin, "source_name", "sendspin")),
             source_enabled=bool(sendspin.get("source_enabled", False)),
+            state_dir=str(
+                sendspin.get("state_dir", "/var/lib/phono-console/source")
+            ),
         ),
         runtime=RuntimeConfig(
             poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
@@ -130,3 +139,7 @@ def _validate(config: Config) -> None:
         raise ValueError("runtime.poll_interval_ms must be between 10 and 5000")
     if not 1 <= config.runtime.api_port <= 65535:
         raise ValueError("runtime.api_port must be between 1 and 65535")
+    if not all(config.music_assistant.whole_house_players):
+        raise ValueError("music_assistant.whole_house_players entries must be non-empty")
+    if config.sendspin.source_enabled and not config.sendspin.state_dir:
+        raise ValueError("sendspin.state_dir is required when source_enabled is true")
