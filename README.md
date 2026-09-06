@@ -32,10 +32,10 @@ hold times prevent record noise or brief pauses from causing rapid switching.
 
 ## Current status
 
-This repository starts with the routing contract and a hardware-independent
-policy engine. UFO202/ALSA integration and Music Assistant API integration are
-the next implementation steps. Target measured local round-trip latency is
-under 50 ms.
+The hardware-independent controller is implemented: configuration loading,
+phono activity detection with hysteresis and timing, source-priority decisions,
+transition application, and the continuous polling loop. UFO202/ALSA and Music
+Assistant adapters are the next implementation step. Target measured local
+round-trip latency is under 50 ms.
 
 See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
-
