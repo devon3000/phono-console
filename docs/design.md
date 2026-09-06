@@ -19,6 +19,18 @@
 | `ma_playback` | Monitored | MA stream | Off |
 | `whole_house_phono` | Active | Returned MA stream | Phono capture |
 
+## Music Assistant transport decision
+
+The console is a Sendspin player for synchronized Music Assistant playback.
+Whole-house vinyl uses Sendspin's source role to expose the UFO202 capture as a
+native Music Assistant audio source. Source publication remains disabled until
+the compatible Sendspin source client and MA provider are available and pass
+bench testing.
+
+This is an intentional dependency, not a temporary gap to bridge with an HTTP
+radio stream, FIFO transcoder, or unsynchronized local monitor. Waiting keeps
+one timing model for the console and every other room.
+
 ## Automatic policy
 
 Inputs to the policy engine:
@@ -55,6 +67,6 @@ graph connects them only according to the active state. Whole-house mode sends
 capture upstream while local playback consumes the returned stream.
 
 The runtime owns two mutually exclusive capture-consuming processes: the local
-loopback and the whole-house source publisher. Route transitions stop the old
+loopback and the Sendspin source client. Route transitions stop the old
 consumer before starting the new one. Music Assistant playback is produced by
 the MA player client and therefore requires neither capture process.
