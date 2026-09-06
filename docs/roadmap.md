@@ -25,6 +25,15 @@ capture path after failure.
 ## 3. Whole-house vinyl
 
 - Track production-ready Sendspin source-role client/provider support.
+  Status (September 2026): available. Music Assistant stable 2.10.2 ships the
+  `sendspin_source` plugin (fixed 48 kHz / 16-bit / stereo output, paired
+  connections required, streaming starts only on a server `start` command),
+  and aiosendspin 9.1.1 provides the client API
+  (`SendspinClient.create_source_capture()` with `start`/`feed`/`stop`).
+  Constraint: the `sendspin` player package pins `aiosendspin~=6.0.1`, so the
+  source client cannot share the application venv with the player until the
+  player tracks aiosendspin 9.x; the player's separate systemd unit makes a
+  dedicated player venv the likely resolution.
 - Publish the UFO202 capture through the Sendspin source role.
 - Start and stop the selected player group through the MA API.
 - Ensure the console consumes the returned group stream.
