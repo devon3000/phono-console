@@ -1,0 +1,20 @@
+[Unit]
+Description=Phono Console controller
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=phono-console
+Group=phono-console
+ExecStart=/opt/phono-console/.venv/bin/phono-console --config /etc/phono-console.toml status
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/phono-console
+
+[Install]
+WantedBy=multi-user.target
+
