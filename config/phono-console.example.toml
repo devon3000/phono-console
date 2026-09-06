@@ -27,3 +27,6 @@ source_enabled = false
 
 [runtime]
 poll_interval_ms = 100
+api_host = "127.0.0.1"
+api_port = 8765
+api_token_env = "PHONO_CONSOLE_API_TOKEN"
