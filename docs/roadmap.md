@@ -13,6 +13,7 @@
 - Implement audio-level detection with attack, release, and hysteresis.
 - Implement UFO202 loopback lifecycle and pop-free transitions.
 - Observe Music Assistant console-player state.
+- Forward structured controller events to the MA-side integration logger.
 - Enforce source priority and automatic resume behavior.
 - Persist configuration, not transient playback state.
 
@@ -29,4 +30,3 @@
 - Add safe service startup and recovery.
 - Install the Pi, UFO202, and amplifier with adequate ventilation and properly
   enclosed mains wiring.
-
