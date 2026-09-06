@@ -8,9 +8,16 @@ from .state import StateStore
 
 
 class ControlApi:
-    def __init__(self, state: StateStore, token: str | None) -> None:
+    def __init__(
+        self,
+        state: StateStore,
+        token: str | None,
+        *,
+        whole_house_available: bool = True,
+    ) -> None:
         self.state = state
         self.token = token
+        self.whole_house_available = whole_house_available
 
     @web.middleware
     async def authenticate(self, request: web.Request, handler):
@@ -39,6 +46,13 @@ class ControlApi:
         requested = body.get("enabled")
         if not isinstance(requested, bool):
             raise web.HTTPBadRequest(text="enabled must be a boolean")
+        if requested and not self.whole_house_available:
+            raise web.HTTPConflict(
+                text=(
+                    "whole-house vinyl is unavailable until Sendspin source "
+                    "support is enabled"
+                )
+            )
         await self.state.request_whole_house(requested)
         await self.state.emit(
             "whole_house_request_changed", {"enabled": requested, "source": "api"}
@@ -55,4 +69,3 @@ class ControlApi:
             ]
         )
         return app
-
