@@ -59,6 +59,14 @@ vinyl provider logs its own stream lifecycle in Music Assistant. The Pi adapter
 forwards controller events through the integration channel supported by that
 provider; it does not depend on an undocumented arbitrary server-log endpoint.
 
+## Local control and status
+
+The daemon maintains a bounded event history and current status snapshot. A
+small authenticated HTTP API exposes health and status to Home Assistant and
+accepts the explicit whole-house request. It binds to `127.0.0.1` by default;
+installations that expose it to the LAN must configure a bearer token and an
+appropriate host firewall rule.
+
 ## Feedback prevention
 
 The phono capture must never ingest the returned Music Assistant output. The
