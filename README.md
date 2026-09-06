@@ -22,8 +22,8 @@ phono amplifier input, hardware monitor path, or physical input selector.
   loopback.
 - Music Assistant starts playing to the console: play the MA stream instead.
 - Whole-house vinyl is requested: publish the phono capture to Music Assistant
-  and play the returned MA stream locally, keeping the console synchronized
-  with the other rooms.
+  using Sendspin source support and play the returned MA stream locally,
+  keeping the console synchronized with the other rooms.
 - Music Assistant stops: resume local vinyl if phono input is still active.
 - Nothing is active: output silence.
 
@@ -37,5 +37,9 @@ phono activity detection with hysteresis and timing, source-priority decisions,
 transition application, and the continuous polling loop. UFO202/ALSA and Music
 Assistant adapters are the next implementation step. Target measured local
 round-trip latency is under 50 ms.
+
+Whole-house capture deliberately depends on native Sendspin source-role support.
+The project will not add a temporary HTTP-radio or transcoding workaround while
+that support matures.
 
 See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
