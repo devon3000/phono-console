@@ -53,3 +53,8 @@ The phono capture must never ingest the returned Music Assistant output. The
 UFO202 exposes distinct capture and playback endpoints over USB; the software
 graph connects them only according to the active state. Whole-house mode sends
 capture upstream while local playback consumes the returned stream.
+
+The runtime owns two mutually exclusive capture-consuming processes: the local
+loopback and the whole-house source publisher. Route transitions stop the old
+consumer before starting the new one. Music Assistant playback is produced by
+the MA player client and therefore requires neither capture process.
