@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from .config import Config
 from .detector import ActivityDetector
-from .interfaces import AudioRouter, LevelMonitor, MusicAssistant
+from .interfaces import AudioRouter, EventSink, LevelMonitor, MusicAssistant
 from .policy import Inputs, Route, choose_route
 
 LOGGER = logging.getLogger(__name__)
@@ -29,11 +29,13 @@ class Controller:
         level_monitor: LevelMonitor,
         music_assistant: MusicAssistant,
         audio_router: AudioRouter,
+        event_sink: EventSink,
     ) -> None:
         self.config = config
         self.level_monitor = level_monitor
         self.music_assistant = music_assistant
         self.audio_router = audio_router
+        self.event_sink = event_sink
         self.detector = ActivityDetector(
             threshold_dbfs=config.detection.phono_threshold_dbfs,
             attack_seconds=config.detection.attack_ms / 1000,
@@ -61,6 +63,17 @@ class Controller:
                 route.value,
             )
             await self.audio_router.apply(route)
+            await self.event_sink.emit(
+                "route_changed",
+                {
+                    "previous": self.route.value if self.route else None,
+                    "current": route.value,
+                    "phono_active": phono_active,
+                    "ma_playing": ma_playing,
+                    "whole_house_requested": whole_house,
+                    "level_dbfs": level,
+                },
+            )
             self.route = route
 
         return Status(route, phono_active, ma_playing, whole_house, level)
@@ -79,4 +92,3 @@ class Controller:
                         pass
         finally:
             await self.audio_router.close()
-
