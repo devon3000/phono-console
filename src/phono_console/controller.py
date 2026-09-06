@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from .config import Config
 from .detector import ActivityDetector
-from .interfaces import AudioRouter, EventSink, LevelMonitor, MusicAssistant
+from .interfaces import AudioRouter, EventSink, LevelMonitor, MusicAssistant, StatusSink
 from .policy import Inputs, Route, choose_route
 
 LOGGER = logging.getLogger(__name__)
@@ -30,12 +30,14 @@ class Controller:
         music_assistant: MusicAssistant,
         audio_router: AudioRouter,
         event_sink: EventSink,
+        status_sink: StatusSink | None = None,
     ) -> None:
         self.config = config
         self.level_monitor = level_monitor
         self.music_assistant = music_assistant
         self.audio_router = audio_router
         self.event_sink = event_sink
+        self.status_sink = status_sink
         self.detector = ActivityDetector(
             threshold_dbfs=config.detection.phono_threshold_dbfs,
             attack_seconds=config.detection.attack_ms / 1000,
@@ -76,7 +78,10 @@ class Controller:
             )
             self.route = route
 
-        return Status(route, phono_active, ma_playing, whole_house, level)
+        status = Status(route, phono_active, ma_playing, whole_house, level)
+        if self.status_sink is not None:
+            await self.status_sink.set_status(status)
+        return status
 
     async def run(self, stop: asyncio.Event) -> None:
         interval = self.config.runtime.poll_interval_ms / 1000
