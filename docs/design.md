@@ -39,10 +39,17 @@ Priority, highest first:
 When MA playback ends, the controller reevaluates current phono activity and
 returns to local vinyl automatically when appropriate.
 
+## Operational events
+
+The controller emits structured events for route changes, device availability,
+audio-process failures, Music Assistant connectivity, and recovery. The MA-side
+vinyl provider logs its own stream lifecycle in Music Assistant. The Pi adapter
+forwards controller events through the integration channel supported by that
+provider; it does not depend on an undocumented arbitrary server-log endpoint.
+
 ## Feedback prevention
 
 The phono capture must never ingest the returned Music Assistant output. The
 UFO202 exposes distinct capture and playback endpoints over USB; the software
 graph connects them only according to the active state. Whole-house mode sends
 capture upstream while local playback consumes the returned stream.
-
