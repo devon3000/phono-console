@@ -19,10 +19,12 @@
 
 ## 3. Whole-house vinyl
 
-- Publish the UFO202 capture as a Music Assistant source.
+- Track production-ready Sendspin source-role client/provider support.
+- Publish the UFO202 capture through the Sendspin source role.
 - Start and stop the selected player group through the MA API.
 - Ensure the console consumes the returned group stream.
 - Verify synchronization across rooms.
+- Do not build a temporary HTTP-radio/transcoding fallback.
 
 ## 4. Home Assistant and installation
 
