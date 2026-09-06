@@ -36,3 +36,10 @@ class SimulatedAudioRouter:
     async def close(self) -> None:
         self.closed = True
 
+
+@dataclass
+class SimulatedEventSink:
+    events: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+
+    async def emit(self, event: str, details: dict[str, object]) -> None:
+        self.events.append((event, details))
