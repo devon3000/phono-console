@@ -8,6 +8,9 @@ from pathlib import Path
 from .config import load_config
 from .controller import Controller
 from .diagnostics import diagnose
+from .alsa import ArecordLevelMonitor
+from .events import LoggingEventSink
+from .terminal_meter import run_terminal_meter
 from .policy import Inputs, choose_route
 from .simulation import (
     SimulatedAudioRouter,
@@ -19,7 +22,9 @@ from .simulation import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="phono-console")
-    parser.add_argument("command", nargs="?", choices=("route", "diagnose"), default="route")
+    parser.add_argument(
+        "command", nargs="?", choices=("route", "diagnose", "levels"), default="route"
+    )
     parser.add_argument("--config", type=Path)
     parser.add_argument("--phono-active", action="store_true")
     parser.add_argument("--ma-playing", action="store_true")
@@ -28,6 +33,23 @@ def main() -> int:
 
     if args.command == "diagnose":
         return asyncio.run(diagnose())
+
+    if args.command == "levels":
+        if args.config is None:
+            parser.error("levels requires --config")
+        config = load_config(args.config)
+        capture = ArecordLevelMonitor(
+            config.audio.capture_device,
+            LoggingEventSink(),
+            sample_rate=config.audio.sample_rate,
+            channels=config.audio.channels,
+            window_ms=config.audio.detection_window_ms,
+        )
+        try:
+            asyncio.run(run_terminal_meter(capture))
+        except KeyboardInterrupt:
+            pass
+        return 0
 
     if args.config is not None:
         asyncio.run(_validate_controller(args.config))
