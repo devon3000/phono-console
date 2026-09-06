@@ -10,6 +10,7 @@ from .controller import Controller
 from .policy import Inputs, choose_route
 from .simulation import (
     SimulatedAudioRouter,
+    SimulatedEventSink,
     SimulatedLevelMonitor,
     SimulatedMusicAssistant,
 )
@@ -44,6 +45,7 @@ async def _validate_controller(config_path: Path) -> None:
         SimulatedLevelMonitor(),
         SimulatedMusicAssistant(),
         router,
+        SimulatedEventSink(),
     )
     status = await controller.tick(now=0)
     print(json.dumps({"route": status.route.value, "configuration": "valid"}))
