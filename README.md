@@ -32,11 +32,19 @@ hold times prevent record noise or brief pauses from causing rapid switching.
 
 ## Current status
 
-The hardware-independent controller is implemented: configuration loading,
-phono activity detection with hysteresis and timing, source-priority decisions,
-transition application, and the continuous polling loop. UFO202/ALSA and Music
-Assistant adapters are the next implementation step. Target measured local
-round-trip latency is under 50 ms.
+The controller now includes configuration loading, phono activity detection,
+source-priority decisions, supervised routing processes, a real `arecord` level
+monitor, PCM RMS metering, and Music Assistant websocket state tracking. Target
+measured local round-trip latency is under 50 ms.
+
+Run the non-mutating target probe on the Raspberry Pi with:
+
+```bash
+phono-console diagnose
+```
+
+It reports ALSA capture/playback devices and availability of the loopback and
+Sendspin client commands.
 
 Whole-house capture deliberately depends on native Sendspin source-role support.
 The project will not add a temporary HTTP-radio or transcoding workaround while
