@@ -5,6 +5,8 @@ APP_DIR="/opt/phono-console"
 CONFIG_DIR="/etc/phono-console"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
 ENV_FILE="$CONFIG_DIR/environment"
+SERVICE_FILE="/etc/systemd/system/phono-console.service"
+ALSA_FILE="/etc/alsa/conf.d/99-phono-console.conf"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ ${EUID} -ne 0 ]]; then
@@ -32,7 +34,7 @@ detect_ufo_card() {
   line="$(arecord -l 2>/dev/null | awk '
     BEGIN { IGNORECASE=1 }
     /^card [0-9]+:/ && ($0 ~ /UFO202|UCA202|USB Audio CODEC/) {
-      sub(/^card /, ""); sub(/:.*/, ""); print; exit
+      gsub(/:/, "", $3); print $3; exit
     }')"
   printf '%s' "$line"
 }
@@ -58,8 +60,38 @@ else
   default_device="UFO202"
 fi
 
+# Share one hardware capture between the activity meter and local loopback.
+if [[ -n "$card" ]]; then
+  install -d -m 0755 /etc/alsa/conf.d
+  cat >"$ALSA_FILE" <<EOF
+pcm.phono_capture {
+  type dsnoop
+  ipc_key 24680
+  slave {
+    pcm "hw:$card,0"
+    rate 48000
+    channels 2
+  }
+}
+
+pcm.phono_playback {
+  type dmix
+  ipc_key 24681
+  slave {
+    pcm "hw:$card,0"
+    rate 48000
+    channels 2
+  }
+}
+EOF
+  default_device="phono_capture"
+  default_playback_device="phono_playback"
+else
+  default_playback_device="$default_device"
+fi
+
 capture_device="$(prompt "ALSA capture device" "$default_device")"
-playback_device="$(prompt "ALSA playback device" "$default_device")"
+playback_device="$(prompt "ALSA playback device" "$default_playback_device")"
 ma_url="$(prompt "Music Assistant URL" "http://music-assistant.local")"
 ma_player="$(prompt "Music Assistant console player" "Phono Console")"
 vinyl_source="$(prompt "Music Assistant vinyl source" "Console Vinyl")"
@@ -115,12 +147,23 @@ EOF
   chmod 0600 "$ENV_FILE"
 fi
 
+install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
+systemctl daemon-reload
+
 echo
 echo "Validating configuration..."
 phono-console --config "$CONFIG_FILE"
 echo
 echo "Probing audio hardware (a missing UFO202 is okay before installation day)..."
 phono-console diagnose || true
+if [[ -n "$card" ]]; then
+  systemctl enable --now phono-console.service
+  echo "Service status: systemctl status phono-console --no-pager"
+  echo "Live logs:      journalctl -u phono-console -f"
+else
+  systemctl disable phono-console.service >/dev/null 2>&1 || true
+  echo "Service installed but not enabled because the UFO202 was not detected."
+fi
 echo
 echo "Setup complete."
 echo "Configuration: $CONFIG_FILE"
