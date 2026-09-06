@@ -91,4 +91,8 @@ class Controller:
                     except TimeoutError:
                         pass
         finally:
-            await self.audio_router.close()
+            await asyncio.gather(
+                self.audio_router.close(),
+                self.level_monitor.close(),
+                self.music_assistant.close(),
+            )
