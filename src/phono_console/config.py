@@ -10,6 +10,9 @@ class AudioConfig:
     capture_device: str
     playback_device: str
     target_latency_ms: int
+    sample_rate: int = 48_000
+    channels: int = 2
+    detection_window_ms: int = 100
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,7 @@ class MusicAssistantConfig:
     base_url: str
     console_player: str
     vinyl_source: str
+    token_env: str = "PHONO_CONSOLE_MA_TOKEN"
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,9 @@ def load_config(path: Path) -> Config:
             capture_device=str(_required(audio, "capture_device", "audio")),
             playback_device=str(_required(audio, "playback_device", "audio")),
             target_latency_ms=int(_required(audio, "target_latency_ms", "audio")),
+            sample_rate=int(audio.get("sample_rate", 48_000)),
+            channels=int(audio.get("channels", 2)),
+            detection_window_ms=int(audio.get("detection_window_ms", 100)),
         ),
         detection=DetectionConfig(
             phono_threshold_dbfs=float(
@@ -84,6 +91,7 @@ def load_config(path: Path) -> Config:
             base_url=str(_required(ma, "base_url", "music_assistant")),
             console_player=str(_required(ma, "console_player", "music_assistant")),
             vinyl_source=str(_required(ma, "vinyl_source", "music_assistant")),
+            token_env=str(ma.get("token_env", "PHONO_CONSOLE_MA_TOKEN")),
         ),
         sendspin=SendspinConfig(
             server_url=str(_required(sendspin, "server_url", "sendspin")),
@@ -102,6 +110,10 @@ def load_config(path: Path) -> Config:
 def _validate(config: Config) -> None:
     if not 10 <= config.audio.target_latency_ms <= 500:
         raise ValueError("audio.target_latency_ms must be between 10 and 500")
+    if config.audio.sample_rate <= 0 or config.audio.channels not in (1, 2):
+        raise ValueError("audio sample rate/channels are invalid")
+    if not 10 <= config.audio.detection_window_ms <= 1000:
+        raise ValueError("audio.detection_window_ms must be between 10 and 1000")
     if config.detection.attack_ms < 0 or config.detection.release_ms < 0:
         raise ValueError("detection attack/release times cannot be negative")
     if config.detection.hysteresis_db < 0:
