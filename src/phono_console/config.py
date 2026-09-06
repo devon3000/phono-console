@@ -42,6 +42,9 @@ class SendspinConfig:
 @dataclass(frozen=True)
 class RuntimeConfig:
     poll_interval_ms: int = 100
+    api_host: str = "127.0.0.1"
+    api_port: int = 8765
+    api_token_env: str = "PHONO_CONSOLE_API_TOKEN"
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,11 @@ def load_config(path: Path) -> Config:
         ),
         runtime=RuntimeConfig(
             poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
+            api_host=str(runtime.get("api_host", "127.0.0.1")),
+            api_port=int(runtime.get("api_port", 8765)),
+            api_token_env=str(
+                runtime.get("api_token_env", "PHONO_CONSOLE_API_TOKEN")
+            ),
         ),
     )
     _validate(config)
@@ -120,3 +128,5 @@ def _validate(config: Config) -> None:
         raise ValueError("detection.hysteresis_db cannot be negative")
     if not 10 <= config.runtime.poll_interval_ms <= 5000:
         raise ValueError("runtime.poll_interval_ms must be between 10 and 5000")
+    if not 1 <= config.runtime.api_port <= 65535:
+        raise ValueError("runtime.api_port must be between 1 and 65535")
