@@ -20,3 +20,6 @@ class AudioRouter(Protocol):
 
     async def close(self) -> None: ...
 
+
+class EventSink(Protocol):
+    async def emit(self, event: str, details: dict[str, object]) -> None: ...
