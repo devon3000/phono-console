@@ -34,6 +34,8 @@ capture path after failure.
 ## 4. Home Assistant and installation
 
 - Expose mode, source activity, health, and whole-house control.
+- Maintain a rerunnable Raspberry Pi installer that detects the UFO202, creates
+  configuration and a protected environment file, and verifies dependencies.
 - Add safe service startup and recovery.
 - Install the Pi, UFO202, and amplifier with adequate ventilation and properly
   enclosed mains wiring.
