@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class AudioConfig:
+    capture_device: str
+    playback_device: str
+    target_latency_ms: int
+
+
+@dataclass(frozen=True)
+class DetectionConfig:
+    phono_threshold_dbfs: float
+    attack_ms: int
+    release_ms: int
+    hysteresis_db: float
+
+
+@dataclass(frozen=True)
+class MusicAssistantConfig:
+    base_url: str
+    console_player: str
+    vinyl_source: str
+
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    poll_interval_ms: int = 100
+
+
+@dataclass(frozen=True)
+class Config:
+    audio: AudioConfig
+    detection: DetectionConfig
+    music_assistant: MusicAssistantConfig
+    runtime: RuntimeConfig = RuntimeConfig()
+
+
+def _required(table: dict, key: str, section: str):
+    try:
+        return table[key]
+    except KeyError as exc:
+        raise ValueError(f"Missing configuration value [{section}].{key}") from exc
+
+
+def load_config(path: Path) -> Config:
+    with path.open("rb") as handle:
+        raw = tomllib.load(handle)
+
+    audio = raw.get("audio", {})
+    detection = raw.get("detection", {})
+    ma = raw.get("music_assistant", {})
+    runtime = raw.get("runtime", {})
+
+    config = Config(
+        audio=AudioConfig(
+            capture_device=str(_required(audio, "capture_device", "audio")),
+            playback_device=str(_required(audio, "playback_device", "audio")),
+            target_latency_ms=int(_required(audio, "target_latency_ms", "audio")),
+        ),
+        detection=DetectionConfig(
+            phono_threshold_dbfs=float(
+                _required(detection, "phono_threshold_dbfs", "detection")
+            ),
+            attack_ms=int(_required(detection, "attack_ms", "detection")),
+            release_ms=int(_required(detection, "release_ms", "detection")),
+            hysteresis_db=float(_required(detection, "hysteresis_db", "detection")),
+        ),
+        music_assistant=MusicAssistantConfig(
+            base_url=str(_required(ma, "base_url", "music_assistant")),
+            console_player=str(_required(ma, "console_player", "music_assistant")),
+            vinyl_source=str(_required(ma, "vinyl_source", "music_assistant")),
+        ),
+        runtime=RuntimeConfig(
+            poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
+        ),
+    )
+    _validate(config)
+    return config
+
+
+def _validate(config: Config) -> None:
+    if not 10 <= config.audio.target_latency_ms <= 500:
+        raise ValueError("audio.target_latency_ms must be between 10 and 500")
+    if config.detection.attack_ms < 0 or config.detection.release_ms < 0:
+        raise ValueError("detection attack/release times cannot be negative")
+    if config.detection.hysteresis_db < 0:
+        raise ValueError("detection.hysteresis_db cannot be negative")
+    if not 10 <= config.runtime.poll_interval_ms <= 5000:
+        raise ValueError("runtime.poll_interval_ms must be between 10 and 5000")
+
