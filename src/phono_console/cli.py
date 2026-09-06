@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import load_config
 from .controller import Controller
+from .diagnostics import diagnose
 from .policy import Inputs, choose_route
 from .simulation import (
     SimulatedAudioRouter,
@@ -18,11 +19,15 @@ from .simulation import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="phono-console")
+    parser.add_argument("command", nargs="?", choices=("route", "diagnose"), default="route")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--phono-active", action="store_true")
     parser.add_argument("--ma-playing", action="store_true")
     parser.add_argument("--whole-house", action="store_true")
     args = parser.parse_args()
+
+    if args.command == "diagnose":
+        return asyncio.run(diagnose())
 
     if args.config is not None:
         asyncio.run(_validate_controller(args.config))
