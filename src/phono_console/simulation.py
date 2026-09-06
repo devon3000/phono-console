@@ -12,6 +12,9 @@ class SimulatedLevelMonitor:
     async def level_dbfs(self) -> float:
         return self.level
 
+    async def close(self) -> None:
+        return None
+
 
 @dataclass
 class SimulatedMusicAssistant:
@@ -23,6 +26,9 @@ class SimulatedMusicAssistant:
 
     async def whole_house_is_requested(self) -> bool:
         return self.whole_house
+
+    async def close(self) -> None:
+        return None
 
 
 @dataclass
