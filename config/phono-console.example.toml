@@ -14,5 +14,12 @@ base_url = "http://music-assistant.local"
 console_player = "Phono Console"
 vinyl_source = "Console Vinyl"
 
+[sendspin]
+server_url = "ws://music-assistant.local:8927/sendspin"
+player_name = "Phono Console"
+source_name = "Console Vinyl"
+# Source publication stays disabled until source-role support is validated.
+source_enabled = false
+
 [runtime]
 poll_interval_ms = 100
