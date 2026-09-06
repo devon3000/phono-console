@@ -16,6 +16,8 @@ fi
 
 phono-console --config "$CONFIG_FILE"
 phono-console diagnose
+systemctl is-enabled phono-console.service
+systemctl is-active phono-console.service
 
 echo
 echo "Base installation looks good. Run the live input check with:"
