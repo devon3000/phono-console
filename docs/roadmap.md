@@ -36,6 +36,6 @@ capture path after failure.
 - Expose mode, source activity, health, and whole-house control.
 - Maintain a rerunnable Raspberry Pi installer that detects the UFO202, creates
   configuration and a protected environment file, and verifies dependencies.
-- Add safe service startup and recovery.
+- Bench-test service startup, recovery, and USB reconnect behavior on the Pi.
 - Install the Pi, UFO202, and amplifier with adequate ventilation and properly
   enclosed mains wiring.
