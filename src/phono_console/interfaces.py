@@ -27,3 +27,7 @@ class AudioRouter(Protocol):
 
 class EventSink(Protocol):
     async def emit(self, event: str, details: dict[str, object]) -> None: ...
+
+
+class StatusSink(Protocol):
+    async def set_status(self, status: object) -> None: ...
