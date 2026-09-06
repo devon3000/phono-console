@@ -26,10 +26,18 @@ verify the installation with:
 sudo ./scripts/check-install.sh
 ```
 
-The automatic routing daemon and its systemd unit are deliberately not enabled
-by this installer yet: the runtime composition and native Sendspin source role
-remain unfinished. The installed diagnostic, configuration validation, and
-live input calibration commands are usable now.
+When the UFO202 is present, the installer configures shared ALSA capture,
+installs the automatic routing daemon, enables it at boot, and starts it. Use:
+
+```bash
+systemctl status phono-console
+journalctl -u phono-console -f
+```
+
+If the UFO202 is absent, the unit is installed but left disabled; rerunning the
+installer after connecting it completes setup. Native Sendspin source support
+remains disabled, and the API explicitly rejects whole-house vinyl requests
+until that support is implemented.
 
 ## Physical signal path
 
