@@ -1,0 +1,17 @@
+default_mode = "music_assistant"
+state_file = "/var/lib/phono-console/state.json"
+
+[audio]
+capture_device = "UFO202"
+playback_device = "default"
+
+[switch]
+# GPIO integration is not implemented yet. This value documents the intended
+# safe state: Pi audio, which cannot create an analog/digital echo.
+safe_input = "pi"
+
+[music_assistant]
+base_url = "http://music-assistant.local"
+vinyl_source_name = "Console Vinyl"
+console_player_name = "Phono Console"
+
