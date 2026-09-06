@@ -12,6 +12,7 @@ from .alsa import ArecordLevelMonitor
 from .events import LoggingEventSink
 from .terminal_meter import run_terminal_meter
 from .policy import Inputs, choose_route
+from .runtime import configure_logging, run_daemon
 from .simulation import (
     SimulatedAudioRouter,
     SimulatedEventSink,
@@ -23,7 +24,10 @@ from .simulation import (
 def main() -> int:
     parser = argparse.ArgumentParser(prog="phono-console")
     parser.add_argument(
-        "command", nargs="?", choices=("route", "diagnose", "levels"), default="route"
+        "command",
+        nargs="?",
+        choices=("route", "diagnose", "levels", "run"),
+        default="route",
     )
     parser.add_argument("--config", type=Path)
     parser.add_argument("--phono-active", action="store_true")
@@ -49,6 +53,13 @@ def main() -> int:
             asyncio.run(run_terminal_meter(capture))
         except KeyboardInterrupt:
             pass
+        return 0
+
+    if args.command == "run":
+        if args.config is None:
+            parser.error("run requires --config")
+        configure_logging()
+        asyncio.run(run_daemon(load_config(args.config)))
         return 0
 
     if args.config is not None:
