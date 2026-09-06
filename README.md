@@ -3,6 +3,34 @@
 Software-defined audio routing for a turntable console built around one
 Behringer UFO202 and one Raspberry Pi.
 
+## Raspberry Pi installation
+
+On Raspberry Pi OS, clone the repository and run the interactive installer:
+
+```bash
+git clone https://github.com/devon3000/phono-console.git
+cd phono-console
+sudo ./scripts/install.sh
+```
+
+It installs ALSA and the Python application into an isolated virtual
+environment, detects a connected UFO202-compatible USB audio device, asks only
+for audio and Music Assistant settings, writes `/etc/phono-console/config.toml`,
+creates a separate root-only token file, validates the configuration, and runs
+the hardware diagnostic. It is safe to rerun and backs up an existing config.
+
+After adding the Music Assistant token to `/etc/phono-console/environment`,
+verify the installation with:
+
+```bash
+sudo ./scripts/check-install.sh
+```
+
+The automatic routing daemon and its systemd unit are deliberately not enabled
+by this installer yet: the runtime composition and native Sendspin source role
+remain unfinished. The installed diagnostic, configuration validation, and
+live input calibration commands are usable now.
+
 ## Physical signal path
 
 ```text
