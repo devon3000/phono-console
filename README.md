@@ -46,6 +46,28 @@ phono-console diagnose
 It reports ALSA capture/playback devices and availability of the loopback and
 Sendspin client commands.
 
+## Input calibration
+
+Run the live UFO202 input meter with the same configuration used by the
+turntable service:
+
+```bash
+phono-console levels --config /etc/phono-console.toml
+```
+
+The terminal shows independent left/right peak and short-window RMS levels in
+dBFS, maximum peaks since startup, and persistent per-channel clipping flags.
+Press Ctrl-C after playing a representative loud passage or full record side;
+the command prints a final calibration summary.
+
+Meter calculations observe the captured 16-bit stereo PCM and never alter,
+normalize, or resample it. The capture monitor also retains its latest stereo
+reading and session maxima, so the running service can consume those readings
+from its existing capture stream without opening the UFO202 a second time.
+When invoked as a standalone command, `levels` owns the ALSA capture device and
+should be run while the service is stopped unless the ALSA device supports
+sharing.
+
 The embedded control API is designed for Home Assistant and defaults to
 loopback-only access. With `PHONO_CONSOLE_API_TOKEN` set, requests use a bearer
 token. Its initial endpoints are:
