@@ -2,6 +2,9 @@
 capture_device = "UFO202"
 playback_device = "UFO202"
 target_latency_ms = 40
+sample_rate = 48000
+channels = 2
+detection_window_ms = 100
 
 [detection]
 phono_threshold_dbfs = -48.0
@@ -13,6 +16,7 @@ hysteresis_db = 6.0
 base_url = "http://music-assistant.local"
 console_player = "Phono Console"
 vinyl_source = "Console Vinyl"
+token_env = "PHONO_CONSOLE_MA_TOKEN"
 
 [sendspin]
 server_url = "ws://music-assistant.local:8927/sendspin"
