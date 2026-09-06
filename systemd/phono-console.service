@@ -1,0 +1,17 @@
+[Unit]
+Description=Phono Console audio router
+Wants=network-online.target sound.target
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/phono-console/environment
+ExecStart=/opt/phono-console/venv/bin/phono-console run --config /etc/phono-console/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
