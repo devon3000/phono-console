@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from contextlib import suppress
 
 from music_assistant_client import MusicAssistantClient
-from music_assistant_models.enums import PlaybackState
+from music_assistant_models.enums import MediaType, PlaybackState
+from music_assistant_models.helpers import create_uri
 
 from .interfaces import EventSink
 from .state import StateStore
+
+# Provider domain of Music Assistant's sendspin_source plugin, which exposes
+# source-role clients as playable audio sources addressed by client_id.
+SENDSPIN_PROVIDER_DOMAIN = "sendspin"
 
 
 class MusicAssistantState:
@@ -59,12 +65,15 @@ class MusicAssistantState:
                 raise
             await self.events.emit("ma_connected", {"server": self.base_url})
 
-    def _find_player(self):
+    def _find_named_player(self, name: str):
         assert self._client is not None
         for player in self._client.players:
-            if player.player_id == self.console_player or player.name == self.console_player:
+            if player.player_id == name or player.name == name:
                 return player
         return None
+
+    def _find_player(self):
+        return self._find_named_player(self.console_player)
 
     async def console_is_playing(self) -> bool:
         await self._ensure_connected()
@@ -75,6 +84,39 @@ class MusicAssistantState:
             )
             return False
         return player.available and player.playback_state is PlaybackState.PLAYING
+
+    async def play_vinyl_source(
+        self, source_client_id: str, players: Sequence[str]
+    ) -> list[str]:
+        """Start the published vinyl source on the named players/groups."""
+        await self._ensure_connected()
+        assert self._client is not None
+        uri = create_uri(
+            MediaType.AUDIO_SOURCE, SENDSPIN_PROVIDER_DOMAIN, source_client_id
+        )
+        started: list[str] = []
+        for name in players:
+            player = self._find_named_player(name)
+            if player is None:
+                await self.events.emit("ma_player_missing", {"player": name})
+                continue
+            await self._client.player_queues.play_media(player.player_id, uri)
+            started.append(player.player_id)
+        return started
+
+    async def stop_players(self, players: Sequence[str]) -> list[str]:
+        """Stop playback on the named players/groups."""
+        await self._ensure_connected()
+        assert self._client is not None
+        stopped: list[str] = []
+        for name in players:
+            player = self._find_named_player(name)
+            if player is None:
+                await self.events.emit("ma_player_missing", {"player": name})
+                continue
+            await self._client.player_queues.stop(player.player_id)
+            stopped.append(player.player_id)
+        return stopped
 
     async def whole_house_is_requested(self) -> bool:
         if self.state is not None:

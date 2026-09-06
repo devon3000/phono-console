@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import hmac
+from collections.abc import Awaitable, Callable
 
 from aiohttp import web
 
 from .state import StateStore
+
+WholeHouseAction = Callable[[bool], Awaitable[None]]
+
+
+class WholeHouseError(RuntimeError):
+    """A whole-house request that cannot be satisfied right now (HTTP 409)."""
 
 
 class ControlApi:
@@ -14,10 +21,12 @@ class ControlApi:
         token: str | None,
         *,
         whole_house_available: bool = True,
+        whole_house_action: WholeHouseAction | None = None,
     ) -> None:
         self.state = state
         self.token = token
         self.whole_house_available = whole_house_available
+        self.whole_house_action = whole_house_action
 
     @web.middleware
     async def authenticate(self, request: web.Request, handler):
@@ -53,6 +62,15 @@ class ControlApi:
                     "support is enabled"
                 )
             )
+        if self.whole_house_action is not None:
+            try:
+                await self.whole_house_action(requested)
+            except WholeHouseError as exc:
+                raise web.HTTPConflict(text=str(exc)) from exc
+            except Exception as exc:
+                raise web.HTTPBadGateway(
+                    text=f"whole-house request failed: {exc}"
+                ) from exc
         await self.state.request_whole_house(requested)
         await self.state.emit(
             "whole_house_request_changed", {"enabled": requested, "source": "api"}

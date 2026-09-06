@@ -31,11 +31,16 @@ capture path after failure.
   and aiosendspin 9.1.1 provides the client API
   (`SendspinClient.create_source_capture()` with `start`/`feed`/`stop`).
   Constraint: the `sendspin` player package pins `aiosendspin~=6.0.1`, so the
-  source client cannot share the application venv with the player until the
-  player tracks aiosendspin 9.x; the player's separate systemd unit makes a
-  dedicated player venv the likely resolution.
-- Publish the UFO202 capture through the Sendspin source role.
-- Start and stop the selected player group through the MA API.
+  installer gives the player its own venv while the application venv carries
+  aiosendspin 9.x for the in-process source client.
+- Publish the UFO202 capture through the Sendspin source role. Implemented:
+  the daemon's `SendspinSourcePublisher` streams the shared capture when the
+  MA `sendspin_source` plugin commands it and reports line-sense signal state.
+- Start and stop the selected player group through the MA API. Implemented via
+  `PUT /v1/whole-house` against `music_assistant.whole_house_players`;
+  MA/Home-Assistant-initiated playback needs no daemon involvement.
+- Bench-test pairing from the Music Assistant UI against the headless
+  auto-accepted pairing window.
 - Ensure the console consumes the returned group stream.
 - Verify synchronization across rooms.
 - Do not build a temporary HTTP-radio/transcoding fallback.

@@ -52,7 +52,13 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --upgrade pip
 "$APP_DIR/venv/bin/pip" install "$SOURCE_DIR"
 ln -sfn "$APP_DIR/venv/bin/phono-console" /usr/local/bin/phono-console
-ln -sfn "$APP_DIR/venv/bin/sendspin" /usr/local/bin/sendspin
+
+# The sendspin player pins aiosendspin 6.x while the routing daemon's source
+# client needs 9.x, so the player lives in its own venv.
+python3 -m venv "$APP_DIR/player-venv"
+"$APP_DIR/player-venv/bin/pip" install --upgrade pip
+"$APP_DIR/player-venv/bin/pip" install "sendspin>=7.5,<8"
+ln -sfn "$APP_DIR/player-venv/bin/sendspin" /usr/local/bin/sendspin
 
 card="$(detect_ufo_card)"
 if [[ -n "$card" ]]; then
@@ -98,6 +104,7 @@ playback_device="$(prompt "ALSA playback device" "$default_playback_device")"
 ma_url="$(prompt "Music Assistant URL" "http://music-assistant.local")"
 ma_player="$(prompt "Music Assistant console player" "Phono Console")"
 vinyl_source="$(prompt "Music Assistant vinyl source" "Console Vinyl")"
+whole_house_group="$(prompt "Whole-house player group" "Downstairs")"
 sendspin_url="$(prompt "Sendspin server URL" "ws://music-assistant.local:8927/sendspin")"
 
 if [[ -e "$CONFIG_FILE" ]]; then
@@ -126,12 +133,14 @@ base_url = "$(toml_escape "$ma_url")"
 console_player = "$(toml_escape "$ma_player")"
 vinyl_source = "$(toml_escape "$vinyl_source")"
 token_env = "PHONO_CONSOLE_MA_TOKEN"
+whole_house_players = ["$(toml_escape "$whole_house_group")"]
 
 [sendspin]
 server_url = "$(toml_escape "$sendspin_url")"
 player_name = "$(toml_escape "$ma_player")"
 source_name = "$(toml_escape "$vinyl_source")"
-source_enabled = false
+source_enabled = true
+state_dir = "/var/lib/phono-console/source"
 
 [runtime]
 poll_interval_ms = 100

@@ -5,31 +5,22 @@ from .processes import ManagedProcess
 
 
 class ProcessAudioRouter:
-    """Own the local-loopback and whole-house-source process lifecycles."""
+    """Own the local-loopback lifecycle for the console output.
 
-    def __init__(
-        self,
-        local_loopback: ManagedProcess,
-        whole_house_source: ManagedProcess,
-    ) -> None:
+    Music Assistant playback (including the returned whole-house stream) is
+    rendered by the separate Sendspin player service, and whole-house capture
+    publication is command-driven inside the Sendspin source publisher, so the
+    loopback is the only process the routing decision has to manage.
+    """
+
+    def __init__(self, local_loopback: ManagedProcess) -> None:
         self.local_loopback = local_loopback
-        self.whole_house_source = whole_house_source
 
     async def apply(self, route: Route) -> None:
-        # Stop conflicting capture consumers before starting the selected one.
-        if route is not Route.LOCAL_PHONO:
-            await self.local_loopback.stop()
-        if route is not Route.WHOLE_HOUSE_PHONO:
-            await self.whole_house_source.stop()
-
         if route is Route.LOCAL_PHONO:
-            await self.whole_house_source.stop()
             await self.local_loopback.start()
-        elif route is Route.WHOLE_HOUSE_PHONO:
+        else:
             await self.local_loopback.stop()
-            await self.whole_house_source.start()
 
     async def close(self) -> None:
         await self.local_loopback.stop()
-        await self.whole_house_source.stop()
-

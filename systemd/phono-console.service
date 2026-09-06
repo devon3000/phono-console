@@ -12,6 +12,7 @@ RestartSec=5
 TimeoutStopSec=10
 NoNewPrivileges=true
 PrivateTmp=true
+StateDirectory=phono-console/source
 
 [Install]
 WantedBy=multi-user.target

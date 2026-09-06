@@ -6,7 +6,7 @@ After=network-online.target sound.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/phono-console/player.env
-ExecStart=/opt/phono-console/venv/bin/sendspin daemon \
+ExecStart=/opt/phono-console/player-venv/bin/sendspin daemon \
   --url ${PHONO_PLAYER_URL} \
   --name ${PHONO_PLAYER_NAME} \
   --id phono-console \
