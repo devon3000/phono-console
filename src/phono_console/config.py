@@ -28,6 +28,14 @@ class MusicAssistantConfig:
 
 
 @dataclass(frozen=True)
+class SendspinConfig:
+    server_url: str
+    player_name: str
+    source_name: str
+    source_enabled: bool = False
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     poll_interval_ms: int = 100
 
@@ -37,6 +45,7 @@ class Config:
     audio: AudioConfig
     detection: DetectionConfig
     music_assistant: MusicAssistantConfig
+    sendspin: SendspinConfig
     runtime: RuntimeConfig = RuntimeConfig()
 
 
@@ -54,6 +63,7 @@ def load_config(path: Path) -> Config:
     audio = raw.get("audio", {})
     detection = raw.get("detection", {})
     ma = raw.get("music_assistant", {})
+    sendspin = raw.get("sendspin", {})
     runtime = raw.get("runtime", {})
 
     config = Config(
@@ -75,6 +85,12 @@ def load_config(path: Path) -> Config:
             console_player=str(_required(ma, "console_player", "music_assistant")),
             vinyl_source=str(_required(ma, "vinyl_source", "music_assistant")),
         ),
+        sendspin=SendspinConfig(
+            server_url=str(_required(sendspin, "server_url", "sendspin")),
+            player_name=str(_required(sendspin, "player_name", "sendspin")),
+            source_name=str(_required(sendspin, "source_name", "sendspin")),
+            source_enabled=bool(sendspin.get("source_enabled", False)),
+        ),
         runtime=RuntimeConfig(
             poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
         ),
@@ -92,4 +108,3 @@ def _validate(config: Config) -> None:
         raise ValueError("detection.hysteresis_db cannot be negative")
     if not 10 <= config.runtime.poll_interval_ms <= 5000:
         raise ValueError("runtime.poll_interval_ms must be between 10 and 5000")
-
