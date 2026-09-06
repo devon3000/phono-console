@@ -1,0 +1,19 @@
+[Unit]
+Description=Phono Console software audio router
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=phono-console
+Group=audio
+ExecStart=/opt/phono-console/.venv/bin/phono-console
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+
