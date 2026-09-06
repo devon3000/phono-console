@@ -7,6 +7,7 @@ from music_assistant_client import MusicAssistantClient
 from music_assistant_models.enums import PlaybackState
 
 from .interfaces import EventSink
+from .state import StateStore
 
 
 class MusicAssistantState:
@@ -18,11 +19,13 @@ class MusicAssistantState:
         token: str | None,
         console_player: str,
         events: EventSink,
+        state: StateStore | None = None,
     ) -> None:
         self.base_url = base_url
         self.token = token
         self.console_player = console_player
         self.events = events
+        self.state = state
         self._client: MusicAssistantClient | None = None
         self._listener: asyncio.Task[None] | None = None
         self._ready: asyncio.Event | None = None
@@ -74,6 +77,8 @@ class MusicAssistantState:
         return player.available and player.playback_state is PlaybackState.PLAYING
 
     async def whole_house_is_requested(self) -> bool:
+        if self.state is not None:
+            return self.state.whole_house_requested
         return self._whole_house_requested
 
     def request_whole_house(self, requested: bool) -> None:
@@ -87,4 +92,3 @@ class MusicAssistantState:
             with suppress(asyncio.CancelledError):
                 await self._listener
         self._listener = None
-
