@@ -14,3 +14,5 @@ base_url = "http://music-assistant.local"
 console_player = "Phono Console"
 vinyl_source = "Console Vinyl"
 
+[runtime]
+poll_interval_ms = 100
