@@ -31,14 +31,53 @@ toml_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
-detect_ufo_card() {
-  local line
-  line="$(arecord -l 2>/dev/null | awk '
-    BEGIN { IGNORECASE=1 }
-    /^card [0-9]+:/ && ($0 ~ /UFO202|UCA202|USB Audio CODEC/) {
-      gsub(/:/, "", $3); print $3; exit
-    }')"
-  printf '%s' "$line"
+list_hardware_devices() {
+  local command="$1"
+  "$command" -l 2>/dev/null | sed -nE \
+    's/^card ([0-9]+): ([^ ]+) \[([^]]+)\], device ([0-9]+): (.*)$/hw:CARD=\2,DEV=\4|card \1: \3, device \4: \5/p'
+}
+
+preferred_device() {
+  local entry
+  for entry in "$@"; do
+    if [[ "$entry" =~ UFO202|UCA202|USB.Audio.CODEC ]]; then
+      printf '%s' "${entry%%|*}"
+      return
+    fi
+  done
+  if (( $# > 0 )); then
+    printf '%s' "${1%%|*}"
+  else
+    # ALSA's null PCM supplies silence for capture and discards playback. This
+    # keeps the API/dashboard and network clients usable before hardware arrives.
+    printf 'null'
+  fi
+}
+
+choose_audio_device() {
+  local direction="$1" default="$2" choice index entry
+  shift 2
+  local -a options=("$@")
+  options+=(
+    "default|ALSA system default"
+    "null|virtual device (silence for capture; discard playback)"
+  )
+
+  echo >&2
+  echo "Available ALSA $direction devices:" >&2
+  for index in "${!options[@]}"; do
+    entry="${options[$index]}"
+    printf '  %d) %-30s %s\n' \
+      "$((index + 1))" "${entry%%|*}" "${entry#*|}" >&2
+  done
+  echo "You may also enter any ALSA PCM name directly." >&2
+  choice="$(prompt "ALSA $direction device (number or name)" "$default")"
+  if [[ "$choice" =~ ^[0-9]+$ ]] && \
+      (( choice >= 1 && choice <= ${#options[@]} )); then
+    printf '%s' "${options[$((choice - 1))]%%|*}"
+  else
+    printf '%s' "$choice"
+  fi
 }
 
 echo "Installing system packages..."
@@ -66,47 +105,60 @@ python3 -m venv "$APP_DIR/player-venv"
 "$APP_DIR/player-venv/bin/pip" install "sendspin>=7.5,<8"
 ln -sfn "$APP_DIR/player-venv/bin/sendspin" /usr/local/bin/sendspin
 
-card="$(detect_ufo_card)"
-if [[ -n "$card" ]]; then
-  echo "Detected UFO202-compatible USB audio card $card."
-  default_device="plughw:CARD=$card,DEV=0"
+mapfile -t capture_hardware < <(list_hardware_devices arecord)
+mapfile -t playback_hardware < <(list_hardware_devices aplay)
+default_capture_device="$(preferred_device "${capture_hardware[@]}")"
+default_playback_device="$(preferred_device "${playback_hardware[@]}")"
+
+if [[ "$default_capture_device" == *UFO202* || \
+      "$default_capture_device" == *UCA202* || \
+      "$default_capture_device" == *CODEC* ]]; then
+  echo "Detected a UFO202-compatible capture device."
 else
-  echo "UFO202 not detected. You can rerun this installer after connecting it."
-  default_device="UFO202"
+  echo "UFO202 not detected; another device or the virtual null device may be used."
 fi
 
-# Share one hardware capture between the activity meter and local loopback.
-if [[ -n "$card" ]]; then
-  install -d -m 0755 /etc/alsa/conf.d
-  cat >"$ALSA_FILE" <<EOF
+raw_capture_device="$(choose_audio_device \
+  "capture" "$default_capture_device" "${capture_hardware[@]}")"
+raw_playback_device="$(choose_audio_device \
+  "playback" "$default_playback_device" "${playback_hardware[@]}")"
+
+# Hardware PCMs get shared wrappers so the level monitor, local loopback, and
+# Sendspin source can coexist. Named/virtual PCMs are used directly because
+# their sharing behavior belongs to their own ALSA definition.
+install -d -m 0755 /etc/alsa/conf.d
+: >"$ALSA_FILE"
+capture_device="$raw_capture_device"
+if [[ "$raw_capture_device" == hw:* ]]; then
+  cat >>"$ALSA_FILE" <<EOF
 pcm.phono_capture {
   type dsnoop
   ipc_key 24680
   slave {
-    pcm "hw:$card,0"
-    rate 48000
-    channels 2
-  }
-}
-
-pcm.phono_playback {
-  type dmix
-  ipc_key 24681
-  slave {
-    pcm "hw:$card,0"
+    pcm "$raw_capture_device"
     rate 48000
     channels 2
   }
 }
 EOF
-  default_device="phono_capture"
-  default_playback_device="phono_playback"
-else
-  default_playback_device="$default_device"
+  capture_device="phono_capture"
 fi
 
-capture_device="$(prompt "ALSA capture device" "$default_device")"
-playback_device="$(prompt "ALSA playback device" "$default_playback_device")"
+playback_device="$raw_playback_device"
+if [[ "$raw_playback_device" == hw:* ]]; then
+  cat >>"$ALSA_FILE" <<EOF
+pcm.phono_playback {
+  type dmix
+  ipc_key 24681
+  slave {
+    pcm "$raw_playback_device"
+    rate 48000
+    channels 2
+  }
+}
+EOF
+  playback_device="phono_playback"
+fi
 ma_url="$(prompt "Music Assistant URL" "http://music-assistant.local")"
 ma_player="$(prompt "Music Assistant console player" "Phono Console")"
 vinyl_source="$(prompt "Music Assistant vinyl source" "Console Vinyl")"
@@ -196,41 +248,38 @@ echo
 echo "Validating configuration..."
 phono-console --config "$CONFIG_FILE"
 echo
-echo "Probing audio hardware (a missing UFO202 is okay before installation day)..."
+echo "Probing audio hardware (services remain available when hardware is absent)..."
 phono-console diagnose || true
-if [[ -n "$card" ]]; then
-  systemctl enable --now phono-console.service phono-console-player.service
-  healthy=false
-  for _attempt in $(seq 1 30); do
-    if curl --fail --silent --show-error \
-      -H "Authorization: Bearer $api_token" \
-      "http://127.0.0.1:8765/health" >/dev/null; then
-      healthy=true
-      break
-    fi
-    sleep 1
-  done
-  if [[ "$healthy" != true ]]; then
-    systemctl status phono-console.service --no-pager || true
-    echo "The router was installed but did not become healthy." >&2
-    echo "Inspect logs with: journalctl -u phono-console -n 100" >&2
-    exit 1
+systemctl enable phono-console.service phono-console-player.service
+systemctl restart phono-console.service phono-console-player.service
+healthy=false
+for _attempt in $(seq 1 30); do
+  if curl --fail --silent --show-error \
+    -H "Authorization: Bearer $api_token" \
+    "http://127.0.0.1:8765/health" >/dev/null; then
+    healthy=true
+    break
   fi
-  echo "Router status:  systemctl status phono-console --no-pager"
-  echo "Player status:  systemctl status phono-console-player --no-pager"
-  echo "Live logs:      journalctl -u phono-console -u phono-console-player -f"
-else
-  systemctl disable phono-console.service phono-console-player.service \
-    >/dev/null 2>&1 || true
-  echo "Services installed but not enabled because the UFO202 was not detected."
+  sleep 1
+done
+if [[ "$healthy" != true ]]; then
+  systemctl status phono-console.service --no-pager || true
+  echo "Services are enabled, but the dashboard did not become healthy." >&2
+  echo "Inspect logs with: journalctl -u phono-console -n 100" >&2
+  exit 1
 fi
+echo "Router status:  systemctl status phono-console --no-pager"
+echo "Player status:  systemctl status phono-console-player --no-pager"
+echo "Live logs:      journalctl -u phono-console -u phono-console-player -f"
 echo
 echo "Setup complete."
 echo "Configuration: $CONFIG_FILE"
 echo "Secrets:       $ENV_FILE"
 echo "Input meter:   phono-console levels --config $CONFIG_FILE"
+echo "Capture PCM:   $capture_device (selected $raw_capture_device)"
+echo "Playback PCM:  $playback_device (selected $raw_playback_device)"
 dashboard_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo "Dashboard:     http://${dashboard_address:-PHONO_CONSOLE_IP}:8765/"
 echo "Home Assistant: see $SOURCE_DIR/home-assistant/README.md"
 echo
-echo "Rerun this installer after connecting the UFO202 to auto-detect its ALSA device."
+echo "Rerun this installer whenever audio hardware changes to select new devices."

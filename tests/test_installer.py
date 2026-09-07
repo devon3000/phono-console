@@ -22,6 +22,23 @@ def test_installer_secures_and_checks_the_network_api() -> None:
     assert "/health" in installer
 
 
+def test_installer_offers_audio_devices_and_always_enables_services() -> None:
+    installer = (ROOT / "scripts" / "install.sh").read_text()
+    assert "list_hardware_devices arecord" in installer
+    assert "list_hardware_devices aplay" in installer
+    assert '"default|ALSA system default"' in installer
+    assert '"null|virtual device' in installer
+    assert (
+        "systemctl enable phono-console.service phono-console-player.service"
+        in installer
+    )
+    assert (
+        "systemctl restart phono-console.service phono-console-player.service"
+        in installer
+    )
+    assert "systemctl disable phono-console.service" not in installer
+
+
 def test_dashboard_assets_are_declared_as_package_data() -> None:
     project = (ROOT / "pyproject.toml").read_text()
     assert '[tool.setuptools.package-data]' in project

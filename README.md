@@ -14,10 +14,14 @@ sudo ./scripts/install.sh
 ```
 
 It installs ALSA and the Python application into an isolated virtual
-environment, detects a connected UFO202-compatible USB audio device, asks only
-for audio and Music Assistant settings, writes `/etc/phono-console/config.toml`,
-creates a separate root-only token file, validates the configuration, and runs
-the hardware diagnostic. It is safe to rerun and backs up an existing config.
+environment, enumerates the available capture and playback devices, and
+prefers a connected UFO202 automatically. Capture and playback can be selected
+independently by number or by entering any ALSA PCM name. If no audio hardware
+is connected, the default `null` devices keep the services and dashboard
+running so network and Music Assistant setup can be completed first. The
+installer writes `/etc/phono-console/config.toml`, creates a separate root-only
+token file, validates the configuration, and runs the hardware diagnostic. It
+is safe to rerun and backs up an existing config.
 
 After adding the Music Assistant token to `/etc/phono-console/environment`,
 verify the installation with:
@@ -41,8 +45,9 @@ systemctl status phono-console phono-console-player
 journalctl -u phono-console -u phono-console-player -f
 ```
 
-If the UFO202 is absent, the units are installed but left disabled; rerunning
-the installer after connecting it completes setup.
+Both units are always enabled and started, even when the UFO202 is absent.
+Rerun the installer after connecting or changing audio hardware to select the
+new capture and playback devices.
 
 ## Physical signal path
 
