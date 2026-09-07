@@ -81,6 +81,11 @@ class Controller:
         status = Status(route, phono_active, ma_playing, whole_house, level)
         if self.status_sink is not None:
             await self.status_sink.set_status(status)
+            latest = getattr(self.level_monitor, "latest", None)
+            session = getattr(self.level_monitor, "session", None)
+            set_levels = getattr(self.status_sink, "set_input_levels", None)
+            if latest is not None and session is not None and set_levels is not None:
+                await set_levels(latest, session)
         return status
 
     async def run(self, stop: asyncio.Event) -> None:

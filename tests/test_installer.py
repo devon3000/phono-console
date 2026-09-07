@@ -20,3 +20,10 @@ def test_installer_secures_and_checks_the_network_api() -> None:
     assert "secrets.token_urlsafe(32)" in installer
     assert 'Authorization: Bearer $api_token' in installer
     assert "/health" in installer
+
+
+def test_dashboard_assets_are_declared_as_package_data() -> None:
+    project = (ROOT / "pyproject.toml").read_text()
+    assert '[tool.setuptools.package-data]' in project
+    for asset in ("dashboard.html", "dashboard.css", "dashboard.js"):
+        assert (ROOT / "src" / "phono_console" / "static" / asset).is_file()

@@ -126,13 +126,23 @@ it to the LAN, generates a bearer token in `/etc/phono-console/environment`,
 and verifies the authenticated health endpoint before reporting success. Its
 initial endpoints are:
 
+- `GET /` — responsive status and metering dashboard
 - `GET /health`
 - `GET /v1/status`
+- `POST /v1/levels/reset` — clears peak maxima and clipping latches
 - `PUT /v1/whole-house` with `{\"enabled\": true|false}` — starts or stops the
   published vinyl source on the configured `whole_house_players`.
 
 A ready-to-copy Home Assistant package and setup instructions are in
 [home-assistant/](home-assistant/).
+
+The same service hosts a responsive dashboard at `http://PHONO_CONSOLE_IP:8765/`.
+Enter the generated API token once per browser tab to see the active route,
+stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
+Sendspin connectivity, network identity, recent events, and whole-house
+controls. Local-phono output is shown as an explicitly labeled unity-gain input
+mirror; the standalone Sendspin player does not currently expose PCM telemetry,
+so MA output levels are marked unavailable rather than estimated.
 
 Whole-house capture uses native Sendspin source-role support (Music Assistant
 2.10.2 or later with the `sendspin_source` plugin); there is deliberately no

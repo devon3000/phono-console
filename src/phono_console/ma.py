@@ -41,6 +41,20 @@ class MusicAssistantState:
         self._next_retry_at = 0.0
         self._retry_seconds = 1.0
 
+    async def _publish_state(
+        self, connected: bool, error: str | None = None
+    ) -> None:
+        if self.state is None:
+            return
+        payload: dict[str, object] = {
+            "connected": connected,
+            "server": self.base_url,
+            "console_player": self.console_player,
+        }
+        if error is not None:
+            payload["error"] = error
+        await self.state.set_music_assistant_state(payload)
+
     async def _ensure_connected(self) -> None:
         async with self._lock:
             if self._listener is not None and not self._listener.done():
@@ -53,6 +67,7 @@ class MusicAssistantState:
                     with suppress(Exception):
                         error = str(self._listener.exception())
                 await self.events.emit("ma_disconnected", {"error": error})
+                await self._publish_state(False, error)
             self._client = MusicAssistantClient(self.base_url, None, self.token)
             self._ready = asyncio.Event()
             self._listener = asyncio.create_task(
@@ -67,6 +82,7 @@ class MusicAssistantState:
                 self._listener = None
                 raise
             await self.events.emit("ma_connected", {"server": self.base_url})
+            await self._publish_state(True)
 
     def _find_named_player(self, name: str):
         assert self._client is not None
@@ -90,6 +106,7 @@ class MusicAssistantState:
                     "retry_seconds": self._retry_seconds,
                 },
             )
+            await self._publish_state(False, str(exc))
             self._next_retry_at = (
                 asyncio.get_running_loop().time() + self._retry_seconds
             )
@@ -182,3 +199,4 @@ class MusicAssistantState:
             with suppress(asyncio.CancelledError):
                 await self._listener
         self._listener = None
+        await self._publish_state(False)

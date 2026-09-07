@@ -29,6 +29,52 @@ def test_api_requires_token_and_controls_whole_house() -> None:
     asyncio.run(scenario())
 
 
+def test_dashboard_assets_are_public_but_live_data_is_authenticated() -> None:
+    async def scenario() -> None:
+        state = StateStore()
+        client = TestClient(TestServer(ControlApi(state, "secret").application()))
+        await client.start_server()
+        try:
+            response = await client.get("/")
+            assert response.status == 200
+            assert "Phono Console" in await response.text()
+            response = await client.get("/assets/dashboard.css")
+            assert response.status == 200
+            assert "meter-track" in await response.text()
+            response = await client.get("/assets/dashboard.js")
+            assert response.status == 200
+            assert 'api("/v1/status")' in await response.text()
+            response = await client.get("/v1/status")
+            assert response.status == 401
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_level_history_reset_invokes_capture_reset() -> None:
+    async def scenario() -> None:
+        state = StateStore()
+        resets = 0
+
+        def reset() -> None:
+            nonlocal resets
+            resets += 1
+
+        api = ControlApi(state, None, level_reset_action=reset)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.post("/v1/levels/reset")
+            assert response.status == 200
+            assert resets == 1
+            assert state.events[-1].event == "input_level_history_reset"
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
 def test_api_invokes_whole_house_action() -> None:
     async def scenario() -> None:
         from phono_console.api import WholeHouseError

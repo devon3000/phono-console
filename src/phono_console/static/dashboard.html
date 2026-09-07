@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0e0d">
+  <title>Phono Console</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">PHONO CONSOLE</p>
+        <h1 id="route-title">Starting…</h1>
+      </div>
+      <div class="live-state" aria-live="polite">
+        <span id="live-dot" class="status-dot pending"></span>
+        <span id="live-label">CONNECTING</span>
+      </div>
+    </header>
+
+    <section class="route-card panel">
+      <div class="route-copy">
+        <span class="label">ACTIVE ROUTE</span>
+        <strong id="route-name">—</strong>
+        <span id="route-detail" class="muted">Waiting for daemon status</span>
+      </div>
+      <div class="route-flags">
+        <div><span id="phono-dot" class="status-dot"></span>PHONO INPUT</div>
+        <div><span id="ma-play-dot" class="status-dot"></span>MA PLAYBACK</div>
+        <div><span id="house-dot" class="status-dot"></span>WHOLE HOUSE</div>
+      </div>
+    </section>
+
+    <section class="meter-grid">
+      <article class="panel meter-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="label">UFO202 ADC</span>
+            <h2>Input</h2>
+          </div>
+          <button id="reset-levels" class="quiet-button" type="button">RESET MAX</button>
+        </div>
+        <p class="meter-note">48 kHz · 16-bit · stereo · peak / RMS</p>
+
+        <div class="channel" data-channel="left">
+          <div class="channel-head"><b>L</b><output id="in-l-value">— dBFS</output></div>
+          <div class="meter-track" role="meter" aria-label="Left input level">
+            <div id="in-l-rms" class="meter-rms"></div>
+            <div id="in-l-peak" class="meter-peak"></div>
+          </div>
+          <div class="channel-foot"><span id="in-l-rms-value">RMS —</span><span id="in-l-max">MAX —</span><span id="in-l-clip" class="clip">CLIP</span></div>
+        </div>
+
+        <div class="channel" data-channel="right">
+          <div class="channel-head"><b>R</b><output id="in-r-value">— dBFS</output></div>
+          <div class="meter-track" role="meter" aria-label="Right input level">
+            <div id="in-r-rms" class="meter-rms"></div>
+            <div id="in-r-peak" class="meter-peak"></div>
+          </div>
+          <div class="channel-foot"><span id="in-r-rms-value">RMS —</span><span id="in-r-max">MAX —</span><span id="in-r-clip" class="clip">CLIP</span></div>
+        </div>
+        <div class="scale"><span>−60</span><span>−40</span><span>−20</span><span>−10</span><span>0</span></div>
+      </article>
+
+      <article class="panel meter-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="label">LOCAL SPEAKERS</span>
+            <h2>Output</h2>
+          </div>
+          <span id="output-badge" class="source-badge">WAITING</span>
+        </div>
+        <p id="output-note" class="meter-note">Waiting for routing state</p>
+
+        <div class="channel">
+          <div class="channel-head"><b>L</b><output id="out-l-value">— dBFS</output></div>
+          <div class="meter-track" role="meter" aria-label="Left output level">
+            <div id="out-l-rms" class="meter-rms"></div>
+            <div id="out-l-peak" class="meter-peak"></div>
+          </div>
+          <div class="channel-foot"><span id="out-l-rms-value">RMS —</span><span id="out-l-max">MAX —</span></div>
+        </div>
+
+        <div class="channel">
+          <div class="channel-head"><b>R</b><output id="out-r-value">— dBFS</output></div>
+          <div class="meter-track" role="meter" aria-label="Right output level">
+            <div id="out-r-rms" class="meter-rms"></div>
+            <div id="out-r-peak" class="meter-peak"></div>
+          </div>
+          <div class="channel-foot"><span id="out-r-rms-value">RMS —</span><span id="out-r-max">MAX —</span></div>
+        </div>
+        <div class="scale"><span>−60</span><span>−40</span><span>−20</span><span>−10</span><span>0</span></div>
+      </article>
+    </section>
+
+    <section class="info-grid">
+      <article class="panel info-panel">
+        <div class="panel-heading"><h2>Connections</h2><span class="label">NETWORK</span></div>
+        <dl>
+          <div><dt>Music Assistant</dt><dd><span id="ma-dot" class="status-dot"></span><span id="ma-status">Unknown</span></dd></div>
+          <div><dt>Sendspin source</dt><dd><span id="source-dot" class="status-dot"></span><span id="source-status">Unknown</span></dd></div>
+          <div><dt>Source stream</dt><dd><span id="stream-dot" class="status-dot"></span><span id="stream-status">Idle</span></dd></div>
+          <div><dt>Host</dt><dd id="host-name">—</dd></div>
+          <div><dt>Address</dt><dd id="host-address">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="panel info-panel controls-panel">
+        <div class="panel-heading"><h2>Whole house</h2><span class="label">CONTROL</span></div>
+        <p class="muted">Publish the turntable through Music Assistant to the configured group.</p>
+        <div class="button-row">
+          <button id="house-start" class="primary-button" type="button">PLAY VINYL</button>
+          <button id="house-stop" class="secondary-button" type="button">STOP</button>
+        </div>
+        <p id="control-result" class="control-result" aria-live="polite"></p>
+      </article>
+
+      <article class="panel info-panel events-panel">
+        <div class="panel-heading"><h2>Recent activity</h2><span class="label">EVENT LOG</span></div>
+        <ol id="event-list"><li class="muted">No events yet</li></ol>
+      </article>
+    </section>
+  </main>
+
+  <dialog id="token-dialog">
+    <form id="token-form" method="dialog">
+      <span class="label">AUTHENTICATION</span>
+      <h2>Connect to Phono Console</h2>
+      <p>Enter the API token generated during installation. It stays in this browser tab.</p>
+      <label for="token-input">API token</label>
+      <input id="token-input" type="password" autocomplete="current-password" required>
+      <p id="token-error" class="error-text"></p>
+      <button class="primary-button" type="submit">CONNECT</button>
+    </form>
+  </dialog>
+
+  <script src="/assets/dashboard.js" defer></script>
+</body>
+</html>

@@ -3,7 +3,11 @@ from pathlib import Path
 from phono_console.config import load_config
 import pytest
 
-from phono_console.runtime import local_loopback_command, validate_api_security
+from phono_console.runtime import (
+    local_loopback_command,
+    system_info,
+    validate_api_security,
+)
 
 
 def test_local_loopback_command_uses_configured_audio_path() -> None:
@@ -23,3 +27,9 @@ def test_network_api_requires_token() -> None:
         validate_api_security("0.0.0.0", None)
     validate_api_security("0.0.0.0", "secret")
     validate_api_security("127.0.0.1", None)
+
+
+def test_system_info_has_dashboard_network_shape() -> None:
+    info = system_info()
+    assert isinstance(info["hostname"], str)
+    assert isinstance(info["addresses"], list)

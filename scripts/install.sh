@@ -229,6 +229,8 @@ echo "Setup complete."
 echo "Configuration: $CONFIG_FILE"
 echo "Secrets:       $ENV_FILE"
 echo "Input meter:   phono-console levels --config $CONFIG_FILE"
+dashboard_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
+echo "Dashboard:     http://${dashboard_address:-PHONO_CONSOLE_IP}:8765/"
 echo "Home Assistant: see $SOURCE_DIR/home-assistant/README.md"
 echo
 echo "Rerun this installer after connecting the UFO202 to auto-detect its ALSA device."

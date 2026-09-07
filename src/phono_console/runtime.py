@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import signal
+import socket
 
 from aiohttp import web
 
@@ -28,6 +29,28 @@ def validate_api_security(host: str, token: str | None) -> None:
         raise RuntimeError(
             "PHONO_CONSOLE_API_TOKEN must be set when the API listens on the network"
         )
+
+
+def system_info() -> dict[str, object]:
+    hostname = socket.gethostname()
+    addresses: set[str] = set()
+    try:
+        for result in socket.getaddrinfo(hostname, None):
+            address = result[4][0]
+            if not address.startswith("127.") and address != "::1":
+                addresses.add(address)
+    except OSError:
+        pass
+    # UDP connect performs no network exchange; it asks the kernel which local
+    # interface would carry ordinary LAN traffic. This also works when the
+    # hostname resolves only to Raspberry Pi OS's 127.0.1.1 entry.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_socket:
+            route_socket.connect(("192.0.2.1", 9))
+            addresses.add(route_socket.getsockname()[0])
+    except OSError:
+        pass
+    return {"hostname": hostname, "addresses": sorted(addresses)}
 
 
 def local_loopback_command(config: Config) -> tuple[str, ...]:
@@ -109,11 +132,20 @@ async def run_daemon(config: Config) -> None:
 
     api_token = os.getenv(config.runtime.api_token_env) or None
     validate_api_security(config.runtime.api_host, api_token)
+    await state.set_system_info(system_info())
+    await state.set_music_assistant_state(
+        {
+            "connected": False,
+            "server": config.music_assistant.base_url,
+            "console_player": config.music_assistant.console_player,
+        }
+    )
     api = ControlApi(
         state,
         api_token,
         whole_house_available=config.sendspin.source_enabled,
         whole_house_action=whole_house_action,
+        level_reset_action=monitor.session.reset,
     )
     runner = web.AppRunner(api.application())
     await runner.setup()
