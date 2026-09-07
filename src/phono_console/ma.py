@@ -13,7 +13,7 @@ from .state import StateStore
 
 # Provider domain of Music Assistant's sendspin_source plugin, which exposes
 # source-role clients as playable audio sources addressed by client_id.
-SENDSPIN_PROVIDER_DOMAIN = "sendspin"
+SENDSPIN_PROVIDER_DOMAIN = "sendspin_source"
 
 
 class MusicAssistantState:
@@ -37,6 +37,9 @@ class MusicAssistantState:
         self._ready: asyncio.Event | None = None
         self._whole_house_requested = False
         self._lock = asyncio.Lock()
+        self._connection_task: asyncio.Task[None] | None = None
+        self._next_retry_at = 0.0
+        self._retry_seconds = 1.0
 
     async def _ensure_connected(self) -> None:
         async with self._lock:
@@ -75,8 +78,48 @@ class MusicAssistantState:
     def _find_player(self):
         return self._find_named_player(self.console_player)
 
+    async def _connect_for_status(self) -> None:
+        try:
+            await self._ensure_connected()
+        except Exception as exc:
+            await self.events.emit(
+                "ma_connection_failed",
+                {
+                    "server": self.base_url,
+                    "error": str(exc),
+                    "retry_seconds": self._retry_seconds,
+                },
+            )
+            self._next_retry_at = (
+                asyncio.get_running_loop().time() + self._retry_seconds
+            )
+            self._retry_seconds = min(self._retry_seconds * 2, 30.0)
+            return
+        self._next_retry_at = 0.0
+        self._retry_seconds = 1.0
+
     async def console_is_playing(self) -> bool:
-        await self._ensure_connected()
+        task = self._connection_task
+        if task is not None and task.done():
+            # _connect_for_status handles and records expected connection failures.
+            with suppress(Exception):
+                task.result()
+            self._connection_task = None
+
+        ready = (
+            self._listener is not None
+            and not self._listener.done()
+            and self._ready is not None
+            and self._ready.is_set()
+        )
+        if not ready:
+            now = asyncio.get_running_loop().time()
+            if self._connection_task is None and now >= self._next_retry_at:
+                self._connection_task = asyncio.create_task(
+                    self._connect_for_status(), name="music-assistant-connect"
+                )
+            return False
+
         player = self._find_player()
         if player is None:
             await self.events.emit(
@@ -127,6 +170,11 @@ class MusicAssistantState:
         self._whole_house_requested = requested
 
     async def close(self) -> None:
+        if self._connection_task is not None:
+            self._connection_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._connection_task
+            self._connection_task = None
         if self._client is not None:
             await self._client.disconnect()
         if self._listener is not None:

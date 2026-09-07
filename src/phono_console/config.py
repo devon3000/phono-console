@@ -44,7 +44,7 @@ class SendspinConfig:
 @dataclass(frozen=True)
 class RuntimeConfig:
     poll_interval_ms: int = 100
-    api_host: str = "127.0.0.1"
+    api_host: str = "0.0.0.0"
     api_port: int = 8765
     api_token_env: str = "PHONO_CONSOLE_API_TOKEN"
 
@@ -113,7 +113,7 @@ def load_config(path: Path) -> Config:
         ),
         runtime=RuntimeConfig(
             poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
-            api_host=str(runtime.get("api_host", "127.0.0.1")),
+            api_host=str(runtime.get("api_host", "0.0.0.0")),
             api_port=int(runtime.get("api_port", 8765)),
             api_token_env=str(
                 runtime.get("api_token_env", "PHONO_CONSOLE_API_TOKEN")

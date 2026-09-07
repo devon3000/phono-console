@@ -96,6 +96,10 @@ async def endless_pcm():
         await asyncio.sleep(0)
 
 
+async def finite_pcm():
+    yield b"\x00\x00" * 2 * 960
+
+
 def make_publisher(client: FakeClient, state: StateStore | None = None):
     events = SimulatedEventSink()
     state = state or StateStore()
@@ -184,5 +188,32 @@ def test_phono_activity_is_reported_as_line_sense_signal() -> None:
         await asyncio.wait_for(run, timeout=2)
         values = [signal.value for signal in client.signals]
         assert values[:3] == ["absent", "present", "absent"]
+
+    asyncio.run(scenario())
+
+
+def test_capture_eof_clears_state_and_allows_restart() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        publisher, events, state = make_publisher(client)
+        publisher._pcm_stream_factory = finite_pcm
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.03)
+
+        client.command("start")
+        await asyncio.sleep(0.05)
+        assert publisher._stream_task is None
+        assert state.sendspin_source["streaming"] is False
+
+        client.command("start")
+        await asyncio.sleep(0.05)
+        assert len(client.captures) == 2
+        assert [name for name, _ in events.events].count(
+            "sendspin_source_stream_stopped"
+        ) == 2
+
+        stop.set()
+        await asyncio.wait_for(run, timeout=2)
 
     asyncio.run(scenario())

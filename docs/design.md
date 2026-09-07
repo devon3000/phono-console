@@ -66,9 +66,9 @@ provider; it does not depend on an undocumented arbitrary server-log endpoint.
 
 The daemon maintains a bounded event history and current status snapshot. A
 small authenticated HTTP API exposes health and status to Home Assistant and
-accepts the explicit whole-house request. It binds to `127.0.0.1` by default;
-installations that expose it to the LAN must configure a bearer token and an
-appropriate host firewall rule.
+accepts the explicit whole-house request. The installer binds it to the LAN,
+generates a bearer token, verifies the authenticated health endpoint, and the
+daemon refuses network exposure if that token is absent.
 
 ## Feedback prevention
 

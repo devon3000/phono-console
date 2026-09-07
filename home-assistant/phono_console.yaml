@@ -1,0 +1,47 @@
+# Replace PHONO_CONSOLE_IP and configure phono_console_authorization in secrets.yaml.
+rest:
+  - resource: "http://PHONO_CONSOLE_IP:8765/v1/status"
+    scan_interval: 2
+    timeout: 2
+    headers:
+      Authorization: !secret phono_console_authorization
+    sensor:
+      - name: "Phono Console Route"
+        unique_id: phono_console_route
+        value_template: >-
+          {{ value_json.status.route if value_json.status else 'starting' }}
+      - name: "Phono Console Input Level"
+        unique_id: phono_console_input_level
+        unit_of_measurement: "dBFS"
+        value_template: >-
+          {{ value_json.status.level_dbfs | round(1) if value_json.status else -120 }}
+    binary_sensor:
+      - name: "Phono Console Input Active"
+        unique_id: phono_console_input_active
+        value_template: >-
+          {{ value_json.status.phono_active if value_json.status else false }}
+      - name: "Phono Console Source Connected"
+        unique_id: phono_console_source_connected
+        device_class: connectivity
+        value_template: >-
+          {{ value_json.sendspin_source.connected | default(false) }}
+      - name: "Phono Console Source Streaming"
+        unique_id: phono_console_source_streaming
+        value_template: >-
+          {{ value_json.sendspin_source.streaming | default(false) }}
+
+rest_command:
+  phono_console_whole_house_start:
+    url: "http://PHONO_CONSOLE_IP:8765/v1/whole-house"
+    method: PUT
+    headers:
+      Authorization: !secret phono_console_authorization
+      Content-Type: "application/json"
+    payload: '{"enabled": true}'
+  phono_console_whole_house_stop:
+    url: "http://PHONO_CONSOLE_IP:8765/v1/whole-house"
+    method: PUT
+    headers:
+      Authorization: !secret phono_console_authorization
+      Content-Type: "application/json"
+    payload: '{"enabled": false}'

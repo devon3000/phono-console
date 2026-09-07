@@ -31,6 +31,7 @@ state_dir = "/var/lib/phono-console/source"
 
 [runtime]
 poll_interval_ms = 100
-api_host = "127.0.0.1"
+# Listen on the LAN so Home Assistant can reach the authenticated API.
+api_host = "0.0.0.0"
 api_port = 8765
 api_token_env = "PHONO_CONSOLE_API_TOKEN"

@@ -114,6 +114,7 @@ class SendspinSourcePublisher:
         self._connected = False
         self._stream_task: asyncio.Task[None] | None = None
         self._streaming = False
+        self._stream_lock = asyncio.Lock()
 
     def _default_pcm_stream(self) -> AsyncIterator[bytes]:
         # 20 ms chunks keep feed timestamps fine-grained without hammering
@@ -184,33 +185,34 @@ class SendspinSourcePublisher:
             loop.create_task(self._stop_streaming())
 
     async def _start_streaming(self) -> None:
-        client = self._client
-        if client is None or self._stream_task is not None:
-            return
-        from aiosendspin.models.player import SupportedAudioFormat
-        from aiosendspin.models.types import AudioCodec
+        async with self._stream_lock:
+            client = self._client
+            if client is None or self._stream_task is not None:
+                return
+            from aiosendspin.models.player import SupportedAudioFormat
+            from aiosendspin.models.types import AudioCodec
 
-        capture_format = SupportedAudioFormat(
-            codec=AudioCodec.PCM,
-            channels=self.audio.channels,
-            sample_rate=self.audio.sample_rate,
-            bit_depth=16,
-        )
-        try:
-            await self._await_time_sync(client)
-            capture = client.create_source_capture(capture_format)
-            await capture.start()
-        except Exception as exc:
-            await self.events.emit(
-                "sendspin_source_stream_failed", {"error": str(exc)}
+            capture_format = SupportedAudioFormat(
+                codec=AudioCodec.PCM,
+                channels=self.audio.channels,
+                sample_rate=self.audio.sample_rate,
+                bit_depth=16,
             )
-            return
-        self._streaming = True
-        self._stream_task = asyncio.create_task(
-            self._pump(capture), name="sendspin-source-stream"
-        )
-        await self.events.emit("sendspin_source_stream_started", {})
-        await self._publish_state()
+            try:
+                await self._await_time_sync(client)
+                capture = client.create_source_capture(capture_format)
+                await capture.start()
+            except Exception as exc:
+                await self.events.emit(
+                    "sendspin_source_stream_failed", {"error": str(exc)}
+                )
+                return
+            self._streaming = True
+            self._stream_task = asyncio.create_task(
+                self._pump(capture), name="sendspin-source-stream"
+            )
+            await self.events.emit("sendspin_source_stream_started", {})
+            await self._publish_state()
 
     @staticmethod
     async def _await_time_sync(client: object) -> None:
@@ -237,12 +239,20 @@ class SendspinSourcePublisher:
                 await stream.aclose()
             with suppress(Exception):
                 await capture.stop()
+            if self._stream_task is asyncio.current_task():
+                self._stream_task = None
+                was_streaming = self._streaming
+                self._streaming = False
+                if was_streaming:
+                    await self.events.emit("sendspin_source_stream_stopped", {})
+                    await self._publish_state()
 
     async def _stop_streaming(self) -> None:
-        task = self._stream_task
-        self._stream_task = None
-        was_streaming = self._streaming
-        self._streaming = False
+        async with self._stream_lock:
+            task = self._stream_task
+            self._stream_task = None
+            was_streaming = self._streaming
+            self._streaming = False
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):

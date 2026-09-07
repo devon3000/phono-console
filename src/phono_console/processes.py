@@ -27,8 +27,10 @@ class SubprocessLauncher:
         return await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            # Inherit the service's output so systemd captures child diagnostics
+            # without unread pipes eventually blocking the audio process.
+            stdout=None,
+            stderr=None,
         )
 
 
@@ -98,4 +100,3 @@ class ManagedProcess:
             {"process": self.spec.name, "returncode": process.returncode},
         )
         self._process = None
-

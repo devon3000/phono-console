@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 
-from phono_console.processes import ManagedProcess, ProcessSpec
+from phono_console.processes import ManagedProcess, ProcessSpec, SubprocessLauncher
 from phono_console.simulation import SimulatedEventSink
 
 
@@ -51,3 +51,21 @@ def test_managed_process_is_idempotent_and_reports_lifecycle() -> None:
 
     asyncio.run(scenario())
 
+
+def test_subprocess_output_is_inherited(monkeypatch) -> None:
+    async def scenario() -> None:
+        captured: dict[str, object] = {}
+        process = FakeProcess()
+
+        async def fake_create(*argv, **kwargs):
+            captured.update(kwargs)
+            return process
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+        result = await SubprocessLauncher().start(("alsaloop", "-q"))
+        assert result is process
+        assert captured["stdin"] is asyncio.subprocess.DEVNULL
+        assert captured["stdout"] is None
+        assert captured["stderr"] is None
+
+    asyncio.run(scenario())

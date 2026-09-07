@@ -63,7 +63,7 @@ def test_play_vinyl_source_targets_named_players() -> None:
         assert started == ["console-id"]
         queue_id, uri = client.player_queues.play_calls[0]
         assert queue_id == "console-id"
-        assert uri == "sendspin://audio_source/source-client-id"
+        assert uri == "sendspin_source://audio_source/source-client-id"
         assert ("ma_player_missing", {"player": "Missing Room"}) in events.events
 
         stopped = await state.stop_players(["console-id"])
@@ -75,6 +75,46 @@ def test_play_vinyl_source_targets_named_players() -> None:
 
 async def _noop() -> None:
     return None
+
+
+def test_connection_failure_is_degraded_with_backoff() -> None:
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        state = MusicAssistantState("http://ma", None, "console", events)
+        attempts = 0
+
+        async def fail() -> None:
+            nonlocal attempts
+            attempts += 1
+            raise OSError("offline")
+
+        state._ensure_connected = fail  # type: ignore[method-assign]
+        assert not await state.console_is_playing()
+        await asyncio.sleep(0)
+        assert not await state.console_is_playing()
+        assert attempts == 1
+        assert events.events[0][0] == "ma_connection_failed"
+
+        await state.close()
+
+    asyncio.run(scenario())
+
+
+def test_connecting_to_ma_does_not_block_status_polling() -> None:
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        state = MusicAssistantState("http://ma", None, "console", events)
+        blocked = asyncio.Event()
+
+        async def wait_forever() -> None:
+            await blocked.wait()
+
+        state._ensure_connected = wait_forever  # type: ignore[method-assign]
+        assert not await asyncio.wait_for(state.console_is_playing(), timeout=0.1)
+        assert state._connection_task is not None
+        await state.close()
+
+    asyncio.run(scenario())
 
 
 def test_whole_house_request_is_explicit() -> None:

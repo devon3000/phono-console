@@ -44,7 +44,13 @@ detect_ufo_card() {
 echo "Installing system packages..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  alsa-utils python3 python3-venv
+  alsa-utils curl libportaudio2 python3 python3-venv
+
+if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))'; then
+  echo "phono-console requires Python 3.12 or newer." >&2
+  echo "Install a current Raspberry Pi OS release, then rerun this installer." >&2
+  exit 1
+fi
 
 echo "Installing phono-console into $APP_DIR..."
 install -d -m 0755 "$APP_DIR" "$CONFIG_DIR"
@@ -144,7 +150,7 @@ state_dir = "/var/lib/phono-console/source"
 
 [runtime]
 poll_interval_ms = 100
-api_host = "127.0.0.1"
+api_host = "0.0.0.0"
 api_port = 8765
 api_token_env = "PHONO_CONSOLE_API_TOKEN"
 EOF
@@ -161,11 +167,25 @@ chmod 0644 "$PLAYER_ENV_FILE"
 
 if [[ ! -e "$ENV_FILE" ]]; then
   cat >"$ENV_FILE" <<'EOF'
-# Add tokens after the equals signs. Keep this file root-readable only.
+# Add the Music Assistant token if the server requires one.
 PHONO_CONSOLE_MA_TOKEN=
 PHONO_CONSOLE_API_TOKEN=
 EOF
-  chmod 0600 "$ENV_FILE"
+fi
+chmod 0600 "$ENV_FILE"
+
+api_token="$(awk -F= '$1 == "PHONO_CONSOLE_API_TOKEN" {
+  print substr($0, index($0, "=") + 1)
+}' "$ENV_FILE" | tail -1)"
+if [[ -z "$api_token" ]]; then
+  api_token="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+  if grep -q '^PHONO_CONSOLE_API_TOKEN=' "$ENV_FILE"; then
+    sed -i "s|^PHONO_CONSOLE_API_TOKEN=.*$|PHONO_CONSOLE_API_TOKEN=$api_token|" \
+      "$ENV_FILE"
+  else
+    printf 'PHONO_CONSOLE_API_TOKEN=%s\n' "$api_token" >>"$ENV_FILE"
+  fi
+  echo "Generated a Home Assistant API token in $ENV_FILE"
 fi
 
 install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
@@ -180,6 +200,22 @@ echo "Probing audio hardware (a missing UFO202 is okay before installation day).
 phono-console diagnose || true
 if [[ -n "$card" ]]; then
   systemctl enable --now phono-console.service phono-console-player.service
+  healthy=false
+  for _attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error \
+      -H "Authorization: Bearer $api_token" \
+      "http://127.0.0.1:8765/health" >/dev/null; then
+      healthy=true
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$healthy" != true ]]; then
+    systemctl status phono-console.service --no-pager || true
+    echo "The router was installed but did not become healthy." >&2
+    echo "Inspect logs with: journalctl -u phono-console -n 100" >&2
+    exit 1
+  fi
   echo "Router status:  systemctl status phono-console --no-pager"
   echo "Player status:  systemctl status phono-console-player --no-pager"
   echo "Live logs:      journalctl -u phono-console -u phono-console-player -f"
@@ -193,5 +229,6 @@ echo "Setup complete."
 echo "Configuration: $CONFIG_FILE"
 echo "Secrets:       $ENV_FILE"
 echo "Input meter:   phono-console levels --config $CONFIG_FILE"
+echo "Home Assistant: see $SOURCE_DIR/home-assistant/README.md"
 echo
 echo "Rerun this installer after connecting the UFO202 to auto-detect its ALSA device."

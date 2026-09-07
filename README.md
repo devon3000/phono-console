@@ -121,14 +121,18 @@ When invoked as a standalone command, `levels` owns the ALSA capture device and
 should be run while the service is stopped unless the ALSA device supports
 sharing.
 
-The embedded control API is designed for Home Assistant and defaults to
-loopback-only access. With `PHONO_CONSOLE_API_TOKEN` set, requests use a bearer
-token. Its initial endpoints are:
+The embedded control API is designed for Home Assistant. The installer exposes
+it to the LAN, generates a bearer token in `/etc/phono-console/environment`,
+and verifies the authenticated health endpoint before reporting success. Its
+initial endpoints are:
 
 - `GET /health`
 - `GET /v1/status`
 - `PUT /v1/whole-house` with `{\"enabled\": true|false}` — starts or stops the
   published vinyl source on the configured `whole_house_players`.
+
+A ready-to-copy Home Assistant package and setup instructions are in
+[home-assistant/](home-assistant/).
 
 Whole-house capture uses native Sendspin source-role support (Music Assistant
 2.10.2 or later with the `sendspin_source` plugin); there is deliberately no

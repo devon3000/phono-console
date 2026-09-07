@@ -88,7 +88,13 @@ class Controller:
         try:
             while not stop.is_set():
                 started = time.monotonic()
-                await self.tick(started)
+                try:
+                    await self.tick(started)
+                except Exception as exc:
+                    LOGGER.warning("controller tick failed: %s", exc)
+                    await self.event_sink.emit(
+                        "controller_tick_failed", {"error": str(exc)}
+                    )
                 remaining = interval - (time.monotonic() - started)
                 if remaining > 0:
                     try:

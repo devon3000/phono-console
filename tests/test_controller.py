@@ -44,3 +44,38 @@ def test_controller_applies_only_changed_routes() -> None:
         ]
 
     asyncio.run(scenario())
+
+
+def test_controller_run_retries_after_transient_dependency_failure() -> None:
+    class FlakyMonitor:
+        calls = 0
+
+        async def level_dbfs(self) -> float:
+            self.calls += 1
+            if self.calls == 1:
+                raise OSError("capture temporarily unavailable")
+            return -120.0
+
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        monitor = FlakyMonitor()
+        events = SimulatedEventSink()
+        stop = asyncio.Event()
+        subject = Controller(
+            config(),
+            monitor,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            events,
+        )
+        task = asyncio.create_task(subject.run(stop))
+        while monitor.calls < 2:
+            await asyncio.sleep(0.01)
+        stop.set()
+        await task
+        assert any(name == "controller_tick_failed" for name, _ in events.events)
+        assert subject.route is Route.IDLE
+
+    asyncio.run(scenario())
