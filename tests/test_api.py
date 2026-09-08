@@ -99,8 +99,26 @@ def test_api_invokes_whole_house_action() -> None:
 
             fail = True
             response = await client.put("/v1/whole-house", json={"enabled": False})
-            assert response.status == 409
-            assert state.whole_house_requested  # unchanged on failure
+            assert response.status == 202
+            assert not state.whole_house_requested
+            assert "not confirmed" in (await response.json())["warning"]
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_health_separates_liveness_from_audio_readiness() -> None:
+    async def scenario() -> None:
+        state = StateStore()
+        client = TestClient(TestServer(ControlApi(state, None).application()))
+        await client.start_server()
+        try:
+            response = await client.get("/health/live")
+            assert response.status == 200
+            assert (await response.json())["operational"] is False
+            response = await client.get("/health/ready")
+            assert response.status == 503
         finally:
             await client.close()
 

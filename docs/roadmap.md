@@ -8,9 +8,10 @@
 - Measure round-trip latency; acceptance target is below 50 ms.
 - Measure idle/noise levels to set phono detection thresholds.
 
-Use `phono-console diagnose` for the initial device/tool report. The implemented
-`ArecordLevelMonitor` reads 48 kHz, 16-bit PCM, reports RMS dBFS, and reopens the
-capture path after failure.
+Use `phono-console diagnose --config /etc/phono-console/config.toml` for the
+device/tool report and one-second configured-PCM probe. The implemented
+`ArecordLevelMonitor` reads 48 kHz, 16-bit PCM, reports RMS dBFS, times out
+stalled reads, and reopens the capture path with bounded exponential backoff.
 
 ## 2. Automatic router
 
@@ -21,6 +22,9 @@ capture path after failure.
 - Forward structured controller events to the MA-side integration logger.
 - Enforce source priority and automatic resume behavior.
 - Persist configuration, not transient playback state.
+- Reconcile the active audio route continuously and restart a dead loopback.
+- Fail silent immediately when capture disappears; retain MA output ownership
+  when playback telemetry drops mid-stream.
 
 ## 3. Whole-house vinyl
 
@@ -50,6 +54,10 @@ capture path after failure.
 - Expose mode, source activity, health, and whole-house control.
 - Maintain a rerunnable Raspberry Pi installer that detects the UFO202, creates
   configuration and a protected environment file, and verifies dependencies.
+- Preserve configuration by default, atomically activate validated releases,
+  roll executables back after failed startup, and run services unprivileged.
+- Expose separate liveness/readiness health plus per-component failures,
+  configured devices, version, uptime, and error details on the dashboard.
 - Bench-test service startup, recovery, and USB reconnect behavior on the Pi.
 - Install the Pi, UFO202, and amplifier with adequate ventilation and properly
   enclosed mains wiring.

@@ -192,7 +192,7 @@ def test_phono_activity_is_reported_as_line_sense_signal() -> None:
     asyncio.run(scenario())
 
 
-def test_capture_eof_clears_state_and_allows_restart() -> None:
+def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
     async def scenario() -> None:
         client = FakeClient()
         publisher, events, state = make_publisher(client)
@@ -205,13 +205,11 @@ def test_capture_eof_clears_state_and_allows_restart() -> None:
         await asyncio.sleep(0.05)
         assert publisher._stream_task is None
         assert state.sendspin_source["streaming"] is False
-
-        client.command("start")
-        await asyncio.sleep(0.05)
-        assert len(client.captures) == 2
+        assert len(client.captures) >= 2
+        assert state.sendspin_source["stream_requested"] is True
         assert [name for name, _ in events.events].count(
-            "sendspin_source_stream_stopped"
-        ) == 2
+            "sendspin_source_stream_failed"
+        ) >= 1
 
         stop.set()
         await asyncio.wait_for(run, timeout=2)

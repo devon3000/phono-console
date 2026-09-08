@@ -40,6 +40,8 @@ class MusicAssistantState:
         self._connection_task: asyncio.Task[None] | None = None
         self._next_retry_at = 0.0
         self._retry_seconds = 1.0
+        self._last_console_playing = False
+        self._player_missing_reported = False
 
     async def _publish_state(
         self, connected: bool, error: str | None = None
@@ -54,6 +56,13 @@ class MusicAssistantState:
         if error is not None:
             payload["error"] = error
         await self.state.set_music_assistant_state(payload)
+        await self.state.set_component(
+            "music_assistant",
+            "ok" if connected else "degraded",
+            "connected" if connected else (error or "disconnected"),
+            server=self.base_url,
+            console_player=self.console_player,
+        )
 
     async def _ensure_connected(self) -> None:
         async with self._lock:
@@ -71,7 +80,8 @@ class MusicAssistantState:
             self._client = MusicAssistantClient(self.base_url, None, self.token)
             self._ready = asyncio.Event()
             self._listener = asyncio.create_task(
-                self._client.start_listening(self._ready), name="music-assistant-listener"
+                self._client.start_listening(self._ready),
+                name="music-assistant-listener",
             )
             try:
                 await asyncio.wait_for(self._ready.wait(), timeout=10)
@@ -135,15 +145,53 @@ class MusicAssistantState:
                 self._connection_task = asyncio.create_task(
                     self._connect_for_status(), name="music-assistant-connect"
                 )
-            return False
+            # If playback was active when telemetry disappeared, keep the
+            # output reserved. Guessing "stopped" here can mix local phono
+            # with a Sendspin player that is still rendering audio.
+            if self.state is not None:
+                await self.state.set_component(
+                    "sendspin_player",
+                    "degraded",
+                    "playback state unavailable",
+                    output_reserved=self._last_console_playing,
+                )
+            return self._last_console_playing
 
         player = self._find_player()
         if player is None:
-            await self.events.emit(
-                "ma_player_missing", {"player": self.console_player}
-            )
+            if not self._player_missing_reported:
+                await self.events.emit(
+                    "ma_player_missing", {"player": self.console_player}
+                )
+                self._player_missing_reported = True
+            if self.state is not None:
+                await self.state.set_component(
+                    "sendspin_player",
+                    "failed",
+                    f"console player not found: {self.console_player}",
+                )
+            return self._last_console_playing
+        self._player_missing_reported = False
+        if not player.available:
+            self._last_console_playing = False
+            if self.state is not None:
+                await self.state.set_component(
+                    "sendspin_player",
+                    "failed",
+                    f"console player unavailable: {self.console_player}",
+                )
             return False
-        return player.available and player.playback_state is PlaybackState.PLAYING
+        self._last_console_playing = (
+            player.playback_state is PlaybackState.PLAYING
+        )
+        if self.state is not None:
+            await self.state.set_component(
+                "sendspin_player",
+                "ok",
+                "playing" if self._last_console_playing else "ready",
+                player=self.console_player,
+            )
+        return self._last_console_playing
 
     async def play_vinyl_source(
         self, source_client_id: str, players: Sequence[str]

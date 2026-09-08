@@ -36,7 +36,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "diagnose":
-        return asyncio.run(diagnose())
+        config = load_config(args.config) if args.config is not None else None
+        return asyncio.run(diagnose(config))
 
     if args.command == "levels":
         if args.config is None:

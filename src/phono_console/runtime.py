@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import socket
+from importlib.metadata import PackageNotFoundError, version
 
 from aiohttp import web
 
@@ -50,7 +51,15 @@ def system_info() -> dict[str, object]:
             addresses.add(route_socket.getsockname()[0])
     except OSError:
         pass
-    return {"hostname": hostname, "addresses": sorted(addresses)}
+    try:
+        app_version = version("phono-console")
+    except PackageNotFoundError:
+        app_version = "development"
+    return {
+        "hostname": hostname,
+        "addresses": sorted(addresses),
+        "version": app_version,
+    }
 
 
 def local_loopback_command(config: Config) -> tuple[str, ...]:
@@ -132,7 +141,33 @@ async def run_daemon(config: Config) -> None:
 
     api_token = os.getenv(config.runtime.api_token_env) or None
     validate_api_security(config.runtime.api_host, api_token)
-    await state.set_system_info(system_info())
+    info = system_info()
+    info.update(
+        {
+            "capture_device": config.audio.capture_device,
+            "playback_device": config.audio.playback_device,
+            "sample_rate": config.audio.sample_rate,
+            "channels": config.audio.channels,
+        }
+    )
+    await state.set_system_info(info)
+    await state.set_component(
+        "capture",
+        "degraded",
+        "waiting for first PCM sample",
+        device=config.audio.capture_device,
+    )
+    await state.set_component(
+        "local_output", "ok", "standby", device=config.audio.playback_device
+    )
+    await state.set_component(
+        "sendspin_player", "degraded", "waiting for Music Assistant telemetry"
+    )
+    await state.set_component(
+        "sendspin_source",
+        "degraded" if config.sendspin.source_enabled else "ok",
+        "connecting" if config.sendspin.source_enabled else "disabled",
+    )
     await state.set_music_assistant_state(
         {
             "connected": False,

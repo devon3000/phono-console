@@ -34,3 +34,7 @@ class ActivityDetector:
             self._candidate_since = None
         return self.active
 
+    def reset_inactive(self) -> None:
+        """Immediately clear activity when the input measurement is invalid."""
+        self.active = False
+        self._candidate_since = None

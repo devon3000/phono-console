@@ -45,26 +45,79 @@ class Controller:
             hysteresis_db=config.detection.hysteresis_db,
         )
         self.route: Route | None = None
+        self._last_route_error: str | None = None
 
     async def tick(self, now: float | None = None) -> Status:
-        level, ma_playing, whole_house = await asyncio.gather(
-            self.level_monitor.level_dbfs(),
-            self.music_assistant.console_is_playing(),
-            self.music_assistant.whole_house_is_requested(),
-        )
-        phono_active = self.detector.update(
-            level, time.monotonic() if now is None else now
-        )
-        inputs = Inputs(phono_active, ma_playing, whole_house)
-        route = choose_route(inputs)
+        timestamp = time.monotonic() if now is None else now
+        capture_ok = True
+        try:
+            level = await asyncio.wait_for(
+                self.level_monitor.level_dbfs(), timeout=2.0
+            )
+        except Exception as exc:
+            capture_ok = False
+            level = -120.0
+            # A dead capture must silence the local route immediately; the
+            # normal release delay only applies to valid quiet PCM.
+            self.detector.reset_inactive()
+            await self._set_component_from_monitor("capture", "failed", str(exc))
+        else:
+            await self._set_component_from_monitor(
+                "capture", "ok", "capture is producing PCM"
+            )
 
-        if route != self.route:
+        try:
+            ma_playing = await asyncio.wait_for(
+                self.music_assistant.console_is_playing(), timeout=2.0
+            )
+        except Exception as exc:
+            # Reserve the output if telemetry fails. This prevents local audio
+            # being mixed into a network stream whose state became unknown.
+            ma_playing = True
+            await self._set_component("music_assistant", "degraded", str(exc))
+        whole_house = await self.music_assistant.whole_house_is_requested()
+        phono_active = capture_ok and self.detector.update(level, timestamp)
+        inputs = Inputs(phono_active, ma_playing, whole_house)
+        desired_route = choose_route(inputs)
+        route = desired_route
+
+        if desired_route != self.route:
             LOGGER.info(
                 "route transition %s -> %s",
                 self.route.value if self.route else "startup",
-                route.value,
+                desired_route.value,
             )
-            await self.audio_router.apply(route)
+        try:
+            # Reconcile every tick so a child process that dies while the
+            # desired route is unchanged is supervised and restarted.
+            reconciler = getattr(self.audio_router, "reconcile", None)
+            if desired_route == self.route and reconciler is not None:
+                await reconciler(desired_route)
+            elif desired_route != self.route:
+                await self.audio_router.apply(desired_route)
+            await self._set_router_component(desired_route)
+            if self._last_route_error is not None:
+                await self.event_sink.emit(
+                    "route_apply_recovered", {"route": desired_route.value}
+                )
+                self._last_route_error = None
+        except Exception as exc:
+            await self._set_component("local_output", "failed", str(exc))
+            error = str(exc)
+            if error != self._last_route_error:
+                LOGGER.error("audio route %s failed: %s", desired_route.value, exc)
+                await self.event_sink.emit(
+                    "route_apply_failed",
+                    {"route": desired_route.value, "error": error},
+                )
+                self._last_route_error = error
+            route = Route.IDLE
+            try:
+                await self.audio_router.apply(Route.IDLE)
+            except Exception:
+                pass
+
+        if route != self.route:
             await self.event_sink.emit(
                 "route_changed",
                 {
@@ -84,9 +137,52 @@ class Controller:
             latest = getattr(self.level_monitor, "latest", None)
             session = getattr(self.level_monitor, "session", None)
             set_levels = getattr(self.status_sink, "set_input_levels", None)
-            if latest is not None and session is not None and set_levels is not None:
+            if (
+                capture_ok
+                and latest is not None
+                and session is not None
+                and set_levels is not None
+            ):
                 await set_levels(latest, session)
+            elif not capture_ok:
+                clear_levels = getattr(
+                    self.status_sink, "clear_input_levels", None
+                )
+                if clear_levels is not None:
+                    await clear_levels()
         return status
+
+    async def _set_component(
+        self, name: str, status: str, message: str, **details: object
+    ) -> None:
+        setter = getattr(self.status_sink, "set_component", None)
+        if setter is not None:
+            await setter(name, status, message, **details)
+
+    async def _set_component_from_monitor(
+        self, name: str, fallback_status: str, fallback_message: str
+    ) -> None:
+        health = getattr(self.level_monitor, "health", None)
+        if isinstance(health, dict):
+            payload = dict(health)
+            status = str(payload.pop("status", fallback_status))
+            message = str(payload.pop("message", fallback_message))
+            await self._set_component(name, status, message, **payload)
+        else:
+            await self._set_component(name, fallback_status, fallback_message)
+
+    async def _set_router_component(self, route: Route) -> None:
+        process = getattr(self.audio_router, "local_loopback", None)
+        health = getattr(process, "health", None)
+        if route is Route.LOCAL_PHONO and isinstance(health, dict):
+            payload = dict(health)
+            status = str(payload.pop("status", "failed"))
+            message = str(payload.pop("message", "unknown"))
+            await self._set_component("local_output", status, message, **payload)
+        else:
+            await self._set_component(
+                "local_output", "ok", "standby", route=route.value
+            )
 
     async def run(self, stop: asyncio.Event) -> None:
         interval = self.config.runtime.poll_interval_ms / 1000

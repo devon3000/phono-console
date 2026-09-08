@@ -127,6 +127,19 @@ function renderConnections(data) {
   const ma = data.music_assistant || {};
   const source = data.sendspin_source || {};
   const system = data.system || {};
+  const health = data.health || {};
+  const components = data.components || {};
+  const capture = components.capture || {};
+  const output = components.local_output || {};
+  const player = components.sendspin_player || {};
+  setDot("health-dot", Boolean(health.operational), health.status === "degraded");
+  byId("health-status").textContent = health.operational ? "Operational" : "Degraded";
+  setDot("capture-dot", capture.status === "ok", capture.status === "degraded");
+  byId("capture-status").textContent = capture.message || "Unknown";
+  setDot("output-dot", output.status === "ok", output.status === "degraded");
+  byId("output-status").textContent = output.message || "Unknown";
+  setDot("player-dot", player.status === "ok", player.status === "degraded");
+  byId("player-status").textContent = player.message || "Unknown";
   setDot("ma-dot", Boolean(ma.connected));
   byId("ma-status").textContent = ma.connected ? "Connected" : (ma.error ? "Offline" : "Connecting");
   setDot("source-dot", Boolean(source.connected));
@@ -135,6 +148,8 @@ function renderConnections(data) {
   byId("stream-status").textContent = source.streaming ? "Streaming" : "Idle";
   byId("host-name").textContent = system.hostname || "—";
   byId("host-address").textContent = (system.addresses || []).join(", ") || "—";
+  byId("app-version").textContent = `${system.version || "—"} · ${Math.floor(Number(health.uptime_seconds || 0))}s up`;
+  byId("audio-devices").textContent = `${system.capture_device || "—"} → ${system.playback_device || "—"}`;
 }
 
 function renderEvents(events) {
@@ -154,15 +169,16 @@ function renderEvents(events) {
     const date = new Date(event.timestamp);
     time.textContent = Number.isNaN(date.valueOf()) ? "—" : date.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
     const name = document.createElement("span");
-    name.textContent = String(event.event || "event").replaceAll("_", " ");
+    const detail = event.details?.error || event.details?.device || "";
+    name.textContent = `${String(event.event || "event").replaceAll("_", " ")}${detail ? ` — ${detail}` : ""}`;
     item.append(time, name);
     list.append(item);
   }
 }
 
 function render(data) {
-  setDot("live-dot", true);
-  byId("live-label").textContent = "LIVE";
+  setDot("live-dot", Boolean(data.health?.operational), !data.health?.operational);
+  byId("live-label").textContent = data.health?.operational ? "OPERATIONAL" : "DEGRADED";
   renderRoute(data.status, data.whole_house_requested);
   renderMeters(data.status, data.input_levels);
   renderConnections(data);

@@ -19,9 +19,10 @@ prefers a connected UFO202 automatically. Capture and playback can be selected
 independently by number or by entering any ALSA PCM name. If no audio hardware
 is connected, the default `null` devices keep the services and dashboard
 running so network and Music Assistant setup can be completed first. The
-installer writes `/etc/phono-console/config.toml`, creates a separate root-only
+installer writes `/etc/phono-console/config.toml`, creates a service-readable
 token file, validates the configuration, and runs the hardware diagnostic. It
-is safe to rerun and backs up an existing config.
+is safe to rerun: the existing configuration is preserved by default, and a
+fully installed release is atomically activated only after validation.
 
 After adding the Music Assistant token to `/etc/phono-console/environment`,
 verify the installation with:
@@ -46,8 +47,12 @@ journalctl -u phono-console -u phono-console-player -f
 ```
 
 Both units are always enabled and started, even when the UFO202 is absent.
+They run as the unprivileged `phono-console` user, restart automatically, and
+use systemd filesystem/kernel hardening. If a new release does not bring the
+dashboard up, the installer restores the previous executable release.
 Rerun the installer after connecting or changing audio hardware to select the
-new capture and playback devices.
+new capture and playback devices; answer `n` when asked whether to keep the
+existing selection.
 
 ## Physical signal path
 
@@ -95,14 +100,15 @@ Whole-house vinyl is therefore normally driven from Music Assistant or Home
 Assistant ("play the record player downstairs"); the daemon's own API can also
 trigger it on the configured `whole_house_players` group.
 
-Run the non-mutating target probe on the Raspberry Pi with:
+Run the target probe on the Raspberry Pi with:
 
 ```bash
-phono-console diagnose
+phono-console diagnose --config /etc/phono-console/config.toml
 ```
 
-It reports ALSA capture/playback devices and availability of the loopback and
-Sendspin client commands.
+It reports ALSA capture/playback devices, checks the helper commands, and opens
+the configured capture and playback PCMs for one second. The probe does not
+alter configuration, but it briefly consumes/produces silent audio.
 
 ## Input calibration
 
@@ -133,6 +139,9 @@ initial endpoints are:
 
 - `GET /` — responsive status and metering dashboard
 - `GET /health`
+- `GET /health/live` — dashboard process liveness, even without audio hardware
+- `GET /health/ready` — 200 only while the controller and critical audio path
+  are operational
 - `GET /v1/status`
 - `POST /v1/levels/reset` — clears peak maxima and clipping latches
 - `PUT /v1/whole-house` with `{\"enabled\": true|false}` — starts or stops the
@@ -144,8 +153,9 @@ A ready-to-copy Home Assistant package and setup instructions are in
 The same service hosts a responsive dashboard at `http://PHONO_CONSOLE_IP:8765/`.
 Enter the generated API token once per browser tab to see the active route,
 stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
-Sendspin connectivity, network identity, recent events, and whole-house
-controls. Local-phono output is shown as an explicitly labeled unity-gain input
+Sendspin connectivity, component health/errors, configured devices, version,
+uptime, network identity, recent events, and whole-house controls. Local-phono
+output is shown as an explicitly labeled unity-gain input
 mirror; the standalone Sendspin player does not currently expose PCM telemetry,
 so MA output levels are marked unavailable rather than estimated.
 

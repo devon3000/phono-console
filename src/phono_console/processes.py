@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -56,27 +57,57 @@ class ManagedProcess:
         self.launcher = launcher
         self.events = events
         self._process: ProcessHandle | None = None
+        self._next_retry_at = 0.0
+        self._retry_seconds = 0.5
+        self._last_error: str | None = None
 
     @property
     def running(self) -> bool:
         return self._process is not None and self._process.returncode is None
 
+    @property
+    def health(self) -> dict[str, object]:
+        return {
+            "status": "ok" if self.running else "failed",
+            "message": "running" if self.running else (self._last_error or "stopped"),
+            "process": self.spec.name,
+            "retry_in_seconds": round(
+                max(0.0, self._next_retry_at - time.monotonic()), 2
+            ),
+        }
+
     async def start(self) -> None:
         if self.running:
             return
         if self._process is not None:
+            returncode = self._process.returncode
+            self._last_error = f"exited with status {returncode}"
             await self.events.emit(
                 "audio_process_exited",
-                {"process": self.spec.name, "returncode": self._process.returncode},
+                {"process": self.spec.name, "returncode": returncode},
+            )
+            self._process = None
+            self._next_retry_at = time.monotonic() + self._retry_seconds
+            self._retry_seconds = min(self._retry_seconds * 2, 30.0)
+        remaining = self._next_retry_at - time.monotonic()
+        if remaining > 0:
+            raise RuntimeError(
+                f"{self.spec.name} unavailable; restart backoff active"
             )
         try:
             self._process = await self.launcher.start(self.spec.argv)
         except Exception as exc:
+            self._last_error = str(exc)
+            self._next_retry_at = time.monotonic() + self._retry_seconds
+            self._retry_seconds = min(self._retry_seconds * 2, 30.0)
             await self.events.emit(
                 "audio_process_start_failed",
                 {"process": self.spec.name, "error": str(exc)},
             )
             raise
+        self._last_error = None
+        self._next_retry_at = 0.0
+        self._retry_seconds = 0.5
         await self.events.emit("audio_process_started", {"process": self.spec.name})
 
     async def stop(self) -> None:
@@ -100,3 +131,6 @@ class ManagedProcess:
             {"process": self.spec.name, "returncode": process.returncode},
         )
         self._process = None
+        self._last_error = None
+        self._next_retry_at = 0.0
+        self._retry_seconds = 0.5

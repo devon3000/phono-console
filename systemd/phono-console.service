@@ -5,14 +5,26 @@ After=network-online.target sound.target
 
 [Service]
 Type=simple
+User=phono-console
+Group=phono-console
+SupplementaryGroups=audio
 EnvironmentFile=-/etc/phono-console/environment
-ExecStart=/opt/phono-console/venv/bin/phono-console run --config /etc/phono-console/config.toml
-Restart=on-failure
+ExecStart=/opt/phono-console/current/venv/bin/phono-console run --config /etc/phono-console/config.toml
+Restart=always
 RestartSec=5
 TimeoutStopSec=10
 NoNewPrivileges=true
 PrivateTmp=true
-StateDirectory=phono-console/source
+StateDirectory=phono-console
+UMask=0027
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

@@ -46,7 +46,7 @@ def test_controller_applies_only_changed_routes() -> None:
     asyncio.run(scenario())
 
 
-def test_controller_run_retries_after_transient_dependency_failure() -> None:
+def test_controller_capture_failure_fails_silent_and_recovers() -> None:
     class FlakyMonitor:
         calls = 0
 
@@ -75,7 +75,39 @@ def test_controller_run_retries_after_transient_dependency_failure() -> None:
             await asyncio.sleep(0.01)
         stop.set()
         await task
-        assert any(name == "controller_tick_failed" for name, _ in events.events)
+        assert not any(name == "controller_tick_failed" for name, _ in events.events)
         assert subject.route is Route.IDLE
+
+    asyncio.run(scenario())
+
+
+def test_capture_loss_immediately_stops_an_active_local_route() -> None:
+    class DisconnectingMonitor:
+        calls = 0
+
+        async def level_dbfs(self) -> float:
+            self.calls += 1
+            if self.calls >= 3:
+                raise RuntimeError("USB disconnected")
+            return -20.0
+
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        router = SimulatedAudioRouter()
+        subject = Controller(
+            config(),
+            DisconnectingMonitor(),
+            SimulatedMusicAssistant(),
+            router,
+            SimulatedEventSink(),
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.LOCAL_PHONO
+        await subject.tick(now=0.3)
+        assert subject.route is Route.IDLE
+        assert router.routes[-1] is Route.IDLE
 
     asyncio.run(scenario())

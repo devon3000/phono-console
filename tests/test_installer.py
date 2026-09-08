@@ -19,7 +19,8 @@ def test_installer_secures_and_checks_the_network_api() -> None:
     assert 'api_host = "0.0.0.0"' in installer
     assert "secrets.token_urlsafe(32)" in installer
     assert 'Authorization: Bearer $api_token' in installer
-    assert "/health" in installer
+    assert "/health/live" in installer
+    assert "healthy_count >= 3" in installer
 
 
 def test_installer_offers_audio_devices_and_always_enables_services() -> None:
@@ -37,6 +38,12 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
         in installer
     )
     assert "systemctl disable phono-console.service" not in installer
+    assert 'User=phono-console' in (
+        ROOT / "systemd" / "phono-console.service"
+    ).read_text()
+    assert 'Restart=always' in (
+        ROOT / "systemd" / "phono-console-player.service"
+    ).read_text()
 
 
 def test_dashboard_assets_are_declared_as_package_data() -> None:

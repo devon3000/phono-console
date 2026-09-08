@@ -5,20 +5,32 @@ After=network-online.target sound.target
 
 [Service]
 Type=simple
+User=phono-console
+Group=phono-console
+SupplementaryGroups=audio
 EnvironmentFile=/etc/phono-console/player.env
-ExecStart=/opt/phono-console/player-venv/bin/sendspin daemon \
+ExecStart=/opt/phono-console/current/player-venv/bin/sendspin daemon \
   --url ${PHONO_PLAYER_URL} \
   --name ${PHONO_PLAYER_NAME} \
   --id phono-console \
   --audio-device ${PHONO_PLAYER_AUDIO_DEVICE} \
   --settings-dir /var/lib/phono-console/sendspin \
   --disable-mpris
-Restart=on-failure
+Restart=always
 RestartSec=5
 TimeoutStopSec=10
 NoNewPrivileges=true
 PrivateTmp=true
-StateDirectory=phono-console/sendspin
+StateDirectory=phono-console
+UMask=0027
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

@@ -16,7 +16,9 @@ if [[ ! -r "$CONFIG_FILE" ]]; then
 fi
 
 phono-console --config "$CONFIG_FILE"
-phono-console diagnose
+if ! phono-console diagnose --config "$CONFIG_FILE"; then
+  echo "Audio probe failed; the dashboard will show the failed component." >&2
+fi
 systemctl is-enabled phono-console.service
 systemctl is-active phono-console.service
 systemctl is-enabled phono-console-player.service
@@ -32,9 +34,17 @@ if [[ -z "$api_token" ]]; then
 fi
 curl --fail --silent --show-error \
   -H "Authorization: Bearer $api_token" \
-  http://127.0.0.1:8765/health
+  http://127.0.0.1:8765/health/live
+echo
+
+if ! curl --fail --silent --show-error \
+  -H "Authorization: Bearer $api_token" \
+  http://127.0.0.1:8765/health/ready; then
+  echo >&2
+  echo "Dashboard is live, but the audio path is not ready. Check it for details." >&2
+fi
 echo
 
 echo
-echo "Base installation looks good. Run the live input check with:"
+echo "Base installation and dashboard are reachable. Run the live input check with:"
 echo "  phono-console levels --config $CONFIG_FILE"

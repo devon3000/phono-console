@@ -22,5 +22,9 @@ class ProcessAudioRouter:
         else:
             await self.local_loopback.stop()
 
+    async def reconcile(self, route: Route) -> None:
+        """Repair drift without treating an unchanged route as a transition."""
+        await self.apply(route)
+
     async def close(self) -> None:
         await self.local_loopback.stop()

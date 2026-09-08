@@ -41,3 +41,17 @@ def test_state_snapshot_includes_live_stereo_levels_and_resettable_history() -> 
         assert snapshot["input_levels"]["left"]["clipped"] is False
 
     asyncio.run(scenario())
+
+
+def test_health_reports_component_failure_and_stale_controller() -> None:
+    async def scenario() -> None:
+        store = StateStore()
+        assert store.health_snapshot()["operational"] is False
+        await store.set_status(Status(Route.IDLE, False, False, False, -120.0))
+        assert store.health_snapshot()["operational"] is True
+        await store.set_component("capture", "failed", "device missing")
+        health = store.health_snapshot()
+        assert health["operational"] is False
+        assert health["failed_components"] == ["capture"]
+
+    asyncio.run(scenario())

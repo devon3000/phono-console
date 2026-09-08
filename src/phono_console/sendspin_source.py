@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 
+from .alsa import CaptureUnavailable
 from .config import AudioConfig, SendspinConfig
 from .interfaces import EventSink
 from .state import StateStore
@@ -52,15 +53,23 @@ async def arecord_pcm_stream(
         "-c",
         str(channels),
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
     assert process.stdout is not None
     chunk_bytes = chunk_frames * channels * 2
     try:
         while True:
             yield await process.stdout.readexactly(chunk_bytes)
-    except asyncio.IncompleteReadError:
-        return
+    except asyncio.IncompleteReadError as exc:
+        returncode = await process.wait()
+        error = b""
+        if process.stderr is not None:
+            with suppress(TimeoutError):
+                error = await asyncio.wait_for(process.stderr.read(4096), timeout=0.25)
+        message = error.decode(errors="replace").strip()
+        raise CaptureUnavailable(
+            message or f"source capture exited with status {returncode}"
+        ) from exc
     finally:
         if process.returncode is None:
             process.terminate()
@@ -115,6 +124,9 @@ class SendspinSourcePublisher:
         self._stream_task: asyncio.Task[None] | None = None
         self._streaming = False
         self._stream_lock = asyncio.Lock()
+        self._stream_requested = False
+        self._stream_retry_task: asyncio.Task[None] | None = None
+        self._stream_error: str | None = None
 
     def _default_pcm_stream(self) -> AsyncIterator[bytes]:
         # 20 ms chunks keep feed timestamps fine-grained without hammering
@@ -171,7 +183,16 @@ class SendspinSourcePublisher:
                 "connected": self._connected,
                 "streaming": self._streaming,
                 "client_id": self.client_id,
+                "stream_requested": self._stream_requested,
+                "error": self._stream_error,
             }
+        )
+        await self.state.set_component(
+            "sendspin_source",
+            "ok" if self._connected and self._stream_error is None else "degraded",
+            self._stream_error
+            or ("connected" if self._connected else "disconnected"),
+            streaming=self._streaming,
         )
 
     def _on_server_command(self, payload: object) -> None:
@@ -185,6 +206,7 @@ class SendspinSourcePublisher:
             loop.create_task(self._stop_streaming())
 
     async def _start_streaming(self) -> None:
+        self._stream_requested = True
         async with self._stream_lock:
             client = self._client
             if client is None or self._stream_task is not None:
@@ -203,10 +225,14 @@ class SendspinSourcePublisher:
                 capture = client.create_source_capture(capture_format)
                 await capture.start()
             except Exception as exc:
+                self._stream_error = str(exc)
                 await self.events.emit(
                     "sendspin_source_stream_failed", {"error": str(exc)}
                 )
+                await self._publish_state()
+                self._schedule_stream_retry()
                 return
+            self._stream_error = None
             self._streaming = True
             self._stream_task = asyncio.create_task(
                 self._pump(capture), name="sendspin-source-stream"
@@ -225,15 +251,15 @@ class SendspinSourcePublisher:
 
     async def _pump(self, capture: object) -> None:
         stream = self._pcm_stream_factory()
+        error: str | None = None
         try:
             async for chunk in stream:
                 await capture.feed(chunk)
+            error = "PCM capture ended unexpectedly"
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            await self.events.emit(
-                "sendspin_source_stream_failed", {"error": str(exc)}
-            )
+            error = str(exc)
         finally:
             with suppress(Exception):
                 await stream.aclose()
@@ -243,16 +269,60 @@ class SendspinSourcePublisher:
                 self._stream_task = None
                 was_streaming = self._streaming
                 self._streaming = False
+                if error is not None and self._stream_requested:
+                    self._stream_error = error
+                    await self.events.emit(
+                        "sendspin_source_stream_failed", {"error": error}
+                    )
                 if was_streaming:
                     await self.events.emit("sendspin_source_stream_stopped", {})
                     await self._publish_state()
+                if error is not None and self._stream_requested:
+                    self._schedule_stream_retry()
+
+    def _schedule_stream_retry(self) -> None:
+        if (
+            not self._stream_requested
+            or not self._connected
+            or (
+                self._stream_retry_task is not None
+                and not self._stream_retry_task.done()
+            )
+        ):
+            return
+        self._stream_retry_task = asyncio.create_task(
+            self._retry_stream(), name="sendspin-source-capture-retry"
+        )
+
+    async def _retry_stream(self) -> None:
+        try:
+            while self._stream_requested and self._connected:
+                await asyncio.sleep(self.reconnect_seconds)
+                if not self._stream_requested or not self._connected:
+                    break
+                await self._start_streaming()
+                if self._stream_task is not None:
+                    break
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._stream_retry_task is asyncio.current_task():
+                self._stream_retry_task = None
 
     async def _stop_streaming(self) -> None:
+        self._stream_requested = False
+        retry_task = self._stream_retry_task
+        self._stream_retry_task = None
+        if retry_task is not None:
+            retry_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await retry_task
         async with self._stream_lock:
             task = self._stream_task
             self._stream_task = None
             was_streaming = self._streaming
             self._streaming = False
+            self._stream_error = None
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):
