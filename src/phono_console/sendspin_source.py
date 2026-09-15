@@ -27,6 +27,7 @@ LOGGER = logging.getLogger(__name__)
 IDENTITY_FILE = "identity.key"
 PAIRING_FILE = "pairing.json"
 TIME_SYNC_TIMEOUT_SECONDS = 10.0
+SIGNAL_RELEASE_SECONDS = 15.0
 
 PcmStreamFactory = Callable[[], AsyncIterator[bytes]]
 ClientFactory = Callable[[], Awaitable[object]]
@@ -110,6 +111,7 @@ class SendspinSourcePublisher:
         pcm_stream_factory: PcmStreamFactory | None = None,
         reconnect_seconds: float = 5.0,
         signal_poll_seconds: float = 0.5,
+        signal_release_seconds: float = SIGNAL_RELEASE_SECONDS,
         source_devices: dict[Source, str] | None = None,
     ) -> None:
         self.config = sendspin
@@ -122,6 +124,7 @@ class SendspinSourcePublisher:
         self._pcm_stream_factory = pcm_stream_factory or self._default_pcm_stream
         self.reconnect_seconds = reconnect_seconds
         self.signal_poll_seconds = signal_poll_seconds
+        self.signal_release_seconds = signal_release_seconds
         self._client: object | None = None
         self._connected = False
         self._stream_task: asyncio.Task[None] | None = None
@@ -247,9 +250,16 @@ class SendspinSourcePublisher:
             return
         loop = asyncio.get_running_loop()
         if source.command == "start":
-            loop.create_task(self._start_streaming())
+            loop.create_task(self._handle_server_command("start"))
         elif source.command == "stop":
-            loop.create_task(self._stop_streaming())
+            loop.create_task(self._handle_server_command("stop"))
+
+    async def _handle_server_command(self, command: str) -> None:
+        await self.events.emit("sendspin_source_command", {"command": command})
+        if command == "start":
+            await self._start_streaming()
+        else:
+            await self._stop_streaming()
 
     async def _start_streaming(self) -> None:
         self._stream_requested = True
@@ -397,6 +407,7 @@ class SendspinSourcePublisher:
 
     async def _watch_signal(self, stop: asyncio.Event) -> None:
         last: bool | None = None
+        absent_since: float | None = None
         while not stop.is_set():
             status = self.state.status
             selected = None
@@ -407,11 +418,26 @@ class SendspinSourcePublisher:
                     selected = Source.BLUETOOTH
             if selected in self._source_devices:
                 await self.select_source(selected)
-            active = self._distribution_enabled and (
+            detected = (
                 bool(status.phono_active or status.bluetooth_active)
                 if status is not None
                 else False
             )
+            if not self._distribution_enabled:
+                active = False
+                absent_since = None
+            elif detected:
+                active = True
+                absent_since = None
+            elif last is True:
+                if absent_since is None:
+                    absent_since = asyncio.get_running_loop().time()
+                active = (
+                    asyncio.get_running_loop().time() - absent_since
+                    < self.signal_release_seconds
+                )
+            else:
+                active = False
             if self._connected and active != last:
                 await self._send_signal(active)
                 last = active

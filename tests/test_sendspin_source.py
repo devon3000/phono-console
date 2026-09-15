@@ -116,6 +116,7 @@ def make_publisher(client: FakeClient, state: StateStore | None = None):
         pcm_stream_factory=endless_pcm,
         reconnect_seconds=0.01,
         signal_poll_seconds=0.01,
+        signal_release_seconds=0.03,
     )
     publisher.client_id = "source-client-id"
     return publisher, events, state
@@ -216,6 +217,39 @@ def test_bluetooth_activity_is_reported_as_line_sense_signal() -> None:
         stop.set()
         await asyncio.wait_for(run, timeout=2)
         assert "present" in [signal.value for signal in client.signals]
+
+    asyncio.run(scenario())
+
+
+def test_brief_bluetooth_gap_does_not_clear_line_sense() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        state = StateStore()
+        publisher, _, _ = make_publisher(client, state)
+        publisher.signal_release_seconds = 0.2
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.03)
+
+        await state.set_status(
+            Status(
+                Route.LOCAL_BLUETOOTH,
+                False,
+                False,
+                False,
+                -120.0,
+                bluetooth_active=True,
+                bluetooth_level_dbfs=-20.0,
+            )
+        )
+        await asyncio.sleep(0.04)
+        await state.set_status(Status(Route.IDLE, False, False, False, -120.0))
+        await asyncio.sleep(0.08)
+
+        stop.set()
+        await asyncio.wait_for(run, timeout=2)
+        values = [signal.value for signal in client.signals]
+        assert values == ["absent", "present"]
 
     asyncio.run(scenario())
 
