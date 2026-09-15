@@ -171,5 +171,8 @@ In Music Assistant, open the connected Sendspin source's settings and set
 **Automatically play line-in on player** to **Downstairs**. The console reports
 signal presence and waits for Music Assistant's source start command; Live
 Inputs cannot be started through the ordinary queue `play_media` API.
+The authenticated dashboard displays the source's persistent `SP:0...` pairing
+token; paste it into Music Assistant when prompted, then restart the console
+service if Music Assistant does not immediately re-handshake.
 
 See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).

@@ -117,6 +117,7 @@ class SendspinSourcePublisher:
         self.events = events
         self.state = state
         self.client_id: str | None = None
+        self.pairing_token: str | None = None
         self._client_factory = client_factory or self._default_client_factory
         self._pcm_stream_factory = pcm_stream_factory or self._default_pcm_stream
         self.reconnect_seconds = reconnect_seconds
@@ -168,11 +169,25 @@ class SendspinSourcePublisher:
         )
         from aiosendspin.models.types import Roles
         from aiosendspin.noise.trust_store import FileClientPairingStore
+        from aiosendspin.noise import PSKPairingToken, encode_token
+        from aiosendspin.noise.keys import generate_psk, psk_id_for
+        from aiosendspin.noise.trust_store import PairingPsk
 
         state_dir = Path(self.config.state_dir)
         identity = await asyncio.to_thread(load_or_create_identity, state_dir)
         store = await FileClientPairingStore.open(state_dir / PAIRING_FILE)
         self.client_id = identity.peer_id
+        pairing_psk = await store.pairing_psk()
+        if pairing_psk is None:
+            secret = generate_psk()
+            pairing_psk = PairingPsk(psk_id=psk_id_for(secret), psk=secret)
+            await store.set_pairing_psk(pairing_psk)
+        self.pairing_token = encode_token(
+            PSKPairingToken(
+                client_id=self.client_id,
+                pairing_psk=pairing_psk.psk,
+            )
+        )
         return SendspinClient(
             identity,
             self.config.source_name,
@@ -204,6 +219,7 @@ class SendspinSourcePublisher:
                 "connected": self._connected,
                 "streaming": self._streaming,
                 "client_id": self.client_id,
+                "pairing_token": self.pairing_token,
                 "stream_requested": self._stream_requested,
                 "error": self._stream_error,
                 "selected_source": self._selected_source.value,

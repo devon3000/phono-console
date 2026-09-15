@@ -147,6 +147,7 @@ function renderConnections(data) {
   byId("ma-status").textContent = ma.connected ? "Connected" : (ma.error ? "Offline" : "Connecting");
   setDot("source-dot", Boolean(source.connected));
   byId("source-status").textContent = source.connected ? "Connected" : "Offline";
+  byId("source-pairing-token").textContent = source.pairing_token || "—";
   setDot("stream-dot", Boolean(source.streaming), source.connected && !source.streaming);
   byId("stream-status").textContent = source.streaming ? "Streaming" : "Idle";
   byId("host-name").textContent = system.hostname || "—";
