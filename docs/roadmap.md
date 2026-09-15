@@ -50,6 +50,25 @@ stalled reads, and reopens the capture path with bounded exponential backoff.
 - Verify synchronization across rooms.
 - Do not build a temporary HTTP-radio/transcoding fallback.
 
+### Timestamp-preserving source pipeline
+
+- Replace the Bluetooth `BlueALSA -> FFmpeg -> ALSA loopback -> arecord` path
+  with one timestamp-aware capture/fan-out process.
+- Acquire ALSA hardware timestamps and carry first-sample capture time with
+  every PCM block supplied to Sendspin.
+- Use one adaptive resampler and one authoritative sample timeline for local
+  playback, activity detection, metering, and distribution.
+- Account for measured capture/resampler latency and explicitly handle clock
+  drift, gaps, underruns, overruns, and transport restarts.
+- Remove `dsnoop` multi-reader fan-out from Bluetooth once the new component is
+  verified on the Raspberry Pi.
+- Bench-test uninterrupted Bluetooth distribution and cross-room sync for at
+  least one hour, including pause/resume, phone reconnect, MA reconnect, and
+  network interruption.
+
+Until this work is complete, frame-count-derived Sendspin timestamps are a
+mitigation, not proof that original Bluetooth timing is preserved.
+
 ## 4. Home Assistant and installation
 
 - Expose mode, source activity, health, and whole-house control.

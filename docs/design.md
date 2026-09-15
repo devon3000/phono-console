@@ -84,3 +84,43 @@ runs solely in `local_phono`. The source client streams capture upstream only
 while the Music Assistant provider commands it, and Music Assistant playback
 is produced by the separate Sendspin player service, so the returned stream
 never re-enters the capture path.
+
+## Known Bluetooth timestamp limitation
+
+The current Bluetooth path is:
+
+```text
+A2DP/RTP -> BlueALSA -> FFmpeg resampler -> ALSA loopback
+         -> arecord raw PCM -> Sendspin source
+```
+
+Bluetooth packets arrive with transport timestamps, but those timestamps do
+not survive the decoded ALSA PCM interface or `arecord`'s raw stdout format.
+The Sendspin publisher therefore cannot pass the original timestamps through.
+It currently anchors the first PCM sample to the Sendspin client's monotonic
+clock and advances subsequent timestamps from captured frame count. This is a
+stabilization measure: it prevents buffered blocks sent in a burst from being
+assigned overlapping send-time timestamps, but it assumes a continuous sample
+clock and cannot faithfully represent a real capture gap, clock correction,
+underrun, overrun, or transport restart.
+
+This is an architectural limitation for synchronized distribution even when
+the same path sounds acceptable through direct local playback. The durable
+design is a single timestamp-aware Bluetooth capture/fan-out component that:
+
+- exclusively owns the BlueALSA PCM capture;
+- reads ALSA hardware timestamps instead of piping unannotated raw PCM through
+  `arecord`;
+- performs adaptive resampling while maintaining one authoritative sample
+  timeline and measured pipeline latency;
+- preserves and reports discontinuities rather than hiding them;
+- feeds activity detection, direct local playback, and Sendspin from the same
+  timestamped frame stream; and
+- removes the Bluetooth ALSA-loopback/`dsnoop` multi-reader fan-out.
+
+Passing the original A2DP/RTP timestamps end to end would require a BlueALSA
+integration that exposes them before or alongside PCM decode. If that is not
+practical, ALSA hardware timestamps are the required source of truth at the
+capture boundary. The generalized source pipeline should offer the same
+timestamp contract to phono capture, even though phono has no upstream RTP
+clock.
