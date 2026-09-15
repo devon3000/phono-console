@@ -195,6 +195,7 @@ async def run_daemon(config: Config) -> None:
         return bool(
             publisher is not None
             and state.sendspin_source.get("connected")
+            and state.sendspin_source.get("stream_requested")
             and state.music_assistant.get("connected")
         )
 
@@ -202,25 +203,7 @@ async def run_daemon(config: Config) -> None:
         if publisher is None or publisher.client_id is None:
             return False
         await publisher.select_source(source)
-        # Sendspin sources are MA Live Inputs, not ordinary queue media. The
-        # plugin starts the configured destination after our line-sense signal
-        # becomes present and sends source.start back to this client.
-        for _ in range(25):
-            if state.sendspin_source.get("stream_requested"):
-                return True
-            await asyncio.sleep(0.2)
-        await events.emit(
-            "distribution_start_timeout",
-            {
-                "source": source.value,
-                "target": config.routing.distribution_target,
-                "message": (
-                    "configure Automatically play line-in on player in "
-                    "Music Assistant"
-                ),
-            },
-        )
-        return False
+        return bool(state.sendspin_source.get("stream_requested"))
 
     controller = Controller(
         config,

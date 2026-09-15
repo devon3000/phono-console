@@ -391,6 +391,14 @@ class SendspinSourcePublisher:
         last: bool | None = None
         while not stop.is_set():
             status = self.state.status
+            selected = None
+            if status is not None:
+                if status.phono_active:
+                    selected = Source.PHONO
+                elif status.bluetooth_active:
+                    selected = Source.BLUETOOTH
+            if selected in self._source_devices:
+                await self.select_source(selected)
             active = (
                 bool(status.phono_active or status.bluetooth_active)
                 if status is not None
