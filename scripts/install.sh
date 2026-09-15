@@ -139,6 +139,10 @@ python3 -m venv "$release_dir/player-venv"
 "$release_dir/player-venv/bin/pip" install "sendspin>=7.5,<8"
 
 keep_existing=false
+mapfile -t capture_hardware < <(list_hardware_devices arecord)
+mapfile -t playback_hardware < <(list_hardware_devices aplay)
+default_capture_device="$(preferred_device "${capture_hardware[@]}")"
+default_playback_device="$(preferred_device "${playback_hardware[@]}")"
 if [[ -e "$CONFIG_FILE" ]]; then
   keep_answer="$(prompt "Keep existing configuration and audio selection? (y/n)" "y")"
   if [[ "$keep_answer" =~ ^[Yy] ]]; then
@@ -157,12 +161,12 @@ if [[ "$keep_existing" == true ]]; then
   vinyl_source="$(config_value music_assistant vinyl_source)"
   whole_house_group="$(config_value music_assistant whole_house_players)"
   sendspin_url="$(config_value sendspin server_url)"
+  if [[ "$capture_device" == "null" && "$default_capture_device" != "null" ]]; then
+    echo "Replacing legacy null capture with detected hardware: $default_capture_device"
+    raw_capture_device="$default_capture_device"
+    capture_device="$default_capture_device"
+  fi
 else
-mapfile -t capture_hardware < <(list_hardware_devices arecord)
-mapfile -t playback_hardware < <(list_hardware_devices aplay)
-default_capture_device="$(preferred_device "${capture_hardware[@]}")"
-default_playback_device="$(preferred_device "${playback_hardware[@]}")"
-
 if [[ "$default_capture_device" == *UFO202* || \
       "$default_capture_device" == *UCA202* || \
       "$default_capture_device" == *CODEC* ]]; then
@@ -298,6 +302,24 @@ api_token_env = "PHONO_CONSOLE_API_TOKEN"
 EOF
 fi
 
+# Preserved configurations may still name raw hardware (or the legacy null
+# test input). Ensure the shared phono capture wrapper exists and migrate the
+# config before any service starts.
+if [[ "$raw_capture_device" == hw:* ]]; then
+  if ! grep -q '^pcm\.phono_capture' "$ALSA_FILE" 2>/dev/null; then
+    cat >>"$ALSA_FILE" <<EOF
+pcm.phono_capture {
+  type dsnoop
+  ipc_key 24680
+  slave { pcm "$raw_capture_device" rate 48000 channels 2 }
+}
+EOF
+  fi
+  capture_device="phono_capture"
+  sed -i -E '0,/^capture_device = ".*"/s//capture_device = "phono_capture"/' \
+    "$CONFIG_FILE"
+fi
+
 if ! grep -q '^\[bluetooth\]' "$CONFIG_FILE"; then
   cat >>"$CONFIG_FILE" <<'EOF'
 
@@ -325,7 +347,10 @@ sed -i 's/^source_name = "Console Vinyl"/source_name = "Console Input"/' "$CONFI
 
 # Migrate the earlier dmix playback alias to the measured lower-latency direct
 # plug path. Resolve the old slave before replacing/augmenting the file.
-if [[ "$playback_device" == "phono_playback" && -f "$ALSA_FILE" ]]; then
+if [[ ( "$playback_device" == "phono_playback" || \
+        "$playback_device" == "phono_direct" ) && \
+      ! $(grep -c '^pcm\.phono_direct' "$ALSA_FILE" 2>/dev/null || true) -gt 0 && \
+      -f "$ALSA_FILE" ]]; then
   legacy_playback="$(awk '
     /^pcm\.phono_playback[[:space:]]*\{/ { in_block=1; next }
     in_block && /pcm[[:space:]]+"/ {
@@ -425,6 +450,8 @@ ln -sfn "$APP_DIR/current/player-venv/bin/sendspin" /usr/local/bin/sendspin
 install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-player.service" "$PLAYER_SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-bluetooth.service" "$BLUETOOTH_SERVICE_FILE"
+install -d -m 0755 "$release_dir/bin"
+install -m 0755 "$SOURCE_DIR/scripts/bluetooth-ingest.sh" "$release_dir/bin/bluetooth-ingest"
 systemctl daemon-reload
 systemctl enable phono-console.service phono-console-player.service phono-console-bluetooth.service
 systemctl restart phono-console.service phono-console-player.service phono-console-bluetooth.service
@@ -474,5 +501,6 @@ echo "Playback PCM:  $playback_device (selected $raw_playback_device)"
 dashboard_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo "Dashboard:     http://${dashboard_address:-PHONO_CONSOLE_IP}:8765/"
 echo "Home Assistant: see $SOURCE_DIR/home-assistant/README.md"
+echo "Music Assistant: install the Sendspin Source plugin before testing distribution."
 echo
 echo "Rerun this installer whenever audio hardware changes to select new devices."

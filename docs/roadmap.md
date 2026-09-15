@@ -29,7 +29,8 @@ stalled reads, and reopens the capture path with bounded exponential backoff.
 ## 3. Whole-house vinyl
 
 - Track production-ready Sendspin source-role client/provider support.
-  Status (September 2026): available. Music Assistant stable 2.10.2 ships the
+  Status (September 2026): available in Music Assistant versions that support
+  the encrypted aiosendspin 9.x source protocol after installing the
   `sendspin_source` plugin (fixed 48 kHz / 16-bit / stereo output, paired
   connections required, streaming starts only on a server `start` command),
   and aiosendspin 9.1.1 provides the client API

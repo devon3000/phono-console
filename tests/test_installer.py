@@ -7,7 +7,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_install_scripts_are_executable_and_valid_shell() -> None:
-    for name in ("install.sh", "check-install.sh"):
+    for name in ("install.sh", "check-install.sh", "bluetooth-ingest.sh"):
         script = ROOT / "scripts" / name
         assert os.access(script, os.X_OK)
         subprocess.run(["bash", "-n", str(script)], check=True)
@@ -49,6 +49,19 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert 'PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"' in installer
     assert "type dmix" not in installer
     assert (ROOT / "systemd" / "phono-console-bluetooth.service").is_file()
+    bluetooth_unit = (
+        ROOT / "systemd" / "phono-console-bluetooth.service"
+    ).read_text()
+    assert "/opt/phono-console/current/bin/bluetooth-ingest" in bluetooth_unit
+    assert "StartLimitBurst" not in bluetooth_unit
+
+
+def test_installer_migrates_the_legacy_null_capture() -> None:
+    installer = (ROOT / "scripts" / "install.sh").read_text()
+    assert 'capture_device" == "null"' in installer
+    assert "Replacing legacy null capture" in installer
+    assert 'capture_device = "phono_capture"' in installer
+    assert '"$playback_device" == "phono_direct"' in installer
 
 
 def test_dashboard_assets_are_declared_as_package_data() -> None:

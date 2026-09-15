@@ -2,16 +2,14 @@
 Description=Phono Console Bluetooth A2DP ingest
 Wants=bluetooth.service bluealsa.service sound.target
 After=bluetooth.service bluealsa.service sound.target
-StartLimitIntervalSec=60
-StartLimitBurst=6
 
 [Service]
 Type=simple
 User=phono-console
 Group=phono-console
 SupplementaryGroups=audio bluetooth
-ExecStart=/usr/bin/alsaloop -C bluealsa -P console_bt_playback -f S16_LE -r 48000 -c 2 -t 40000
-Restart=on-failure
+ExecStart=/opt/phono-console/current/bin/bluetooth-ingest
+Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true

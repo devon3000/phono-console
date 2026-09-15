@@ -21,12 +21,25 @@ class BluetoothManager:
         self._write_lock = asyncio.Lock()
 
     async def _command(self, command: str) -> None:
-        process = self._process
-        if process is None or process.returncode is not None or process.stdin is None:
-            raise RuntimeError("Bluetooth agent is not running")
+        """Run a BlueZ command and wait for its result.
+
+        Writing several commands into an interactive bluetoothctl process can
+        race adapter discovery at boot. One-shot invocations provide an exit
+        status and make configuration deterministic.
+        """
         async with self._write_lock:
-            process.stdin.write(f"{command}\n".encode())
-            await process.stdin.drain()
+            process = await asyncio.create_subprocess_exec(
+                "bluetoothctl",
+                "--timeout",
+                "10",
+                *command.split(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            detail = (stderr or stdout).decode(errors="replace").strip()
+            raise RuntimeError(detail or f"Bluetooth command failed: {command}")
 
     async def _publish(self, **values: object) -> None:
         current = dict(self.state.bluetooth)
@@ -127,14 +140,14 @@ class BluetoothManager:
             try:
                 self._process = await asyncio.create_subprocess_exec(
                     "bluetoothctl",
+                    "--agent",
+                    "NoInputNoOutput",
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 await self._command("power on")
                 await self._command(f"system-alias {self.config.alias}")
-                await self._command("agent NoInputNoOutput")
-                await self._command("default-agent")
                 await self._command("discoverable off")
                 await self._command("pairable off")
                 await self._publish(enabled=True, agent=True, pairing=False)
@@ -167,10 +180,7 @@ class BluetoothManager:
         process = self._process
         self._process = None
         if process is not None and process.returncode is None:
-            if process.stdin is not None:
-                process.stdin.write(b"quit\n")
-                with suppress(Exception):
-                    await process.stdin.drain()
+            process.terminate()
             with suppress(TimeoutError):
                 await asyncio.wait_for(process.wait(), timeout=2)
             if process.returncode is None:

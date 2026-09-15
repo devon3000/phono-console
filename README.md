@@ -162,8 +162,9 @@ output is shown as an explicitly labeled unity-gain input
 mirror; the standalone Sendspin player does not currently expose PCM telemetry,
 so MA output levels are marked unavailable rather than estimated.
 
-Distributed capture uses native Sendspin source-role support (Music Assistant
-2.10.2 or later with the `sendspin_source` plugin); there is deliberately no
+Distributed capture uses native Sendspin source-role support (a Music Assistant
+version compatible with aiosendspin 9.x, with the `sendspin_source` plugin
+installed); there is deliberately no
 HTTP-radio or transcoding fallback.
 
 See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
