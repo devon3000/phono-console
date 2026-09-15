@@ -147,6 +147,7 @@ def test_distribution_is_released_when_source_signal_ends() -> None:
         level = SimulatedLevelMonitor()
         level.level = -20.0
         released = []
+        distribution_requested = True
 
         async def prepare(_source):
             return True
@@ -160,7 +161,7 @@ def test_distribution_is_released_when_source_signal_ends() -> None:
             SimulatedMusicAssistant(),
             SimulatedAudioRouter(),
             SimulatedEventSink(),
-            distribution_available=lambda: True,
+            distribution_available=lambda: distribution_requested,
             prepare_distribution=prepare,
             release_distribution=release,
         )
@@ -169,8 +170,53 @@ def test_distribution_is_released_when_source_signal_ends() -> None:
         assert subject.route is Route.DISTRIBUTED_PHONO
         level.level = -120.0
         await subject.tick(now=16)
+        # The Sendspin source session remains latched until MA acknowledges
+        # line-sense off with source.stop.
+        assert subject.route is Route.DISTRIBUTED_PHONO
+        distribution_requested = False
         await subject.tick(now=22)
         assert subject.route is Route.IDLE
         assert released == [True]
+
+    asyncio.run(scenario())
+
+
+def test_distributed_bluetooth_stays_latched_during_detector_gap() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor()
+        bluetooth = SimulatedLevelMonitor()
+        bluetooth.level = -20.0
+        ma = SimulatedMusicAssistant()
+        router = SimulatedAudioRouter()
+        released = []
+
+        async def prepare(_source):
+            return True
+
+        async def release():
+            released.append(True)
+
+        subject = Controller(
+            config(),
+            phono,
+            ma,
+            router,
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            distribution_available=lambda: True,
+            prepare_distribution=prepare,
+            release_distribution=release,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=10)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+
+        # MA is now rendering the returned source, while a temporary silence
+        # window makes the local Bluetooth detector release.
+        ma.playing = True
+        bluetooth.level = -120.0
+        await subject.tick(now=13)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        assert released == []
 
     asyncio.run(scenario())

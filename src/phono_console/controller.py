@@ -141,6 +141,23 @@ class Controller:
         available = await self._distribution_ready(timestamp)
         inputs = Inputs(phono_active, bluetooth_active, ma_playing, available)
         desired_route = choose_route(inputs)
+        # Once Music Assistant has requested a source stream, its source.stop
+        # command is the authority for ending that distributed session.  The
+        # local level detector can briefly read silence while ALSA consumers
+        # start or buffers settle; treating that gap as source-off creates a
+        # destructive loop (stop MA, fall back locally, request MA again).
+        # Keep the active distributed path latched, while still allowing the
+        # higher-priority phono input to preempt Bluetooth and Bluetooth to
+        # take over after phono has genuinely released.
+        if available:
+            if self.route is Route.DISTRIBUTED_BLUETOOTH and not phono_active:
+                desired_route = Route.DISTRIBUTED_BLUETOOTH
+            elif self.route is Route.DISTRIBUTED_PHONO and not phono_active:
+                desired_route = (
+                    Route.DISTRIBUTED_BLUETOOTH
+                    if bluetooth_active
+                    else Route.DISTRIBUTED_PHONO
+                )
         was_distributed = self.route in {
             Route.DISTRIBUTED_PHONO,
             Route.DISTRIBUTED_BLUETOOTH,
