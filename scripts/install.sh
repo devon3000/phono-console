@@ -220,9 +220,14 @@ pcm.console_ma_capture {
   type plug
   slave.pcm "hw:Loopback,1,0"
 }
-pcm.console_bt_playback {
+pcm.console_bt_playback48 {
   type plug
-  slave.pcm "hw:Loopback,0,1"
+  slave {
+    pcm "hw:Loopback,0,1"
+    format S16_LE
+    rate 48000
+    channels 2
+  }
 }
 pcm.console_bt_capture_raw {
   type dsnoop
@@ -379,13 +384,27 @@ if ! grep -q '^pcm\.console_ma_playback' "$ALSA_FILE" 2>/dev/null; then
   cat >>"$ALSA_FILE" <<'EOF'
 pcm.console_ma_playback { type plug slave.pcm "hw:Loopback,0,0" }
 pcm.console_ma_capture { type plug slave.pcm "hw:Loopback,1,0" }
-pcm.console_bt_playback { type plug slave.pcm "hw:Loopback,0,1" }
+pcm.console_bt_playback48 {
+  type plug
+  slave { pcm "hw:Loopback,0,1" format S16_LE rate 48000 channels 2 }
+}
 pcm.console_bt_capture_raw {
   type dsnoop
   ipc_key 24682
   slave { pcm "hw:Loopback,1,1" rate 48000 channels 2 }
 }
 pcm.console_bt_capture { type plug slave.pcm "console_bt_capture_raw" }
+EOF
+fi
+
+# Use a versioned Bluetooth playback alias so upgrades replace the earlier
+# unconstrained loopback endpoint without editing an active ALSA definition.
+if ! grep -q '^pcm\.console_bt_playback48' "$ALSA_FILE" 2>/dev/null; then
+  cat >>"$ALSA_FILE" <<'EOF'
+pcm.console_bt_playback48 {
+  type plug
+  slave { pcm "hw:Loopback,0,1" format S16_LE rate 48000 channels 2 }
+}
 EOF
 fi
 
@@ -451,8 +470,6 @@ ln -sfn "$APP_DIR/current/player-venv/bin/sendspin" /usr/local/bin/sendspin
 install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-player.service" "$PLAYER_SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-bluetooth.service" "$BLUETOOTH_SERVICE_FILE"
-install -d -m 0755 "$release_dir/bin"
-install -m 0755 "$SOURCE_DIR/scripts/bluetooth-ingest.sh" "$release_dir/bin/bluetooth-ingest"
 systemctl daemon-reload
 systemctl enable phono-console.service phono-console-player.service phono-console-bluetooth.service
 systemctl restart phono-console.service phono-console-player.service phono-console-bluetooth.service

@@ -8,7 +8,7 @@ Type=simple
 User=phono-console
 Group=phono-console
 SupplementaryGroups=audio bluetooth
-ExecStart=/opt/phono-console/current/bin/bluetooth-ingest
+ExecStart=/usr/bin/bluealsa-aplay --pcm=console_bt_playback48 --single-audio --pcm-buffer-time=200000
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
