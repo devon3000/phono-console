@@ -87,6 +87,9 @@ never re-enters the capture path.
 
 ## Known Bluetooth timestamp limitation
 
+The implementation sequence and acceptance gates are defined in
+[Timestamped audio engine implementation plan](timestamped-audio-engine-plan.md).
+
 The current Bluetooth path is:
 
 ```text

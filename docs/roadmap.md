@@ -52,6 +52,9 @@ stalled reads, and reopens the capture path with bounded exponential backoff.
 
 ### Timestamp-preserving source pipeline
 
+Detailed design, staging, test criteria, and rollback are maintained in
+[Timestamped audio engine implementation plan](timestamped-audio-engine-plan.md).
+
 - Replace the Bluetooth `BlueALSA -> FFmpeg -> ALSA loopback -> arecord` path
   with one timestamp-aware capture/fan-out process.
 - Acquire ALSA hardware timestamps and carry first-sample capture time with
