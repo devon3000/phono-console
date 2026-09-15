@@ -7,7 +7,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_install_scripts_are_executable_and_valid_shell() -> None:
-    for name in ("install.sh", "check-install.sh"):
+    for name in ("install.sh", "check-install.sh", "bluetooth-ingest.sh"):
         script = ROOT / "scripts" / name
         assert os.access(script, os.X_OK)
         subprocess.run(["bash", "-n", str(script)], check=True)
@@ -52,10 +52,12 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     bluetooth_unit = (
         ROOT / "systemd" / "phono-console-bluetooth.service"
     ).read_text()
-    assert "bluealsa-aplay" in bluetooth_unit
-    assert "--single-audio" in bluetooth_unit
-    assert "--pcm-buffer-time=200000" in bluetooth_unit
+    assert "/opt/phono-console/current/bin/bluetooth-ingest" in bluetooth_unit
     assert "StartLimitBurst" not in bluetooth_unit
+    ingest = (ROOT / "scripts" / "bluetooth-ingest.sh").read_text()
+    assert "-A sincfastest" in ingest
+    assert "-S samplerate" in ingest
+    assert "console_bt_playback48" in ingest
 
 
 def test_installer_migrates_the_legacy_null_capture() -> None:

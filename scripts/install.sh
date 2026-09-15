@@ -470,6 +470,8 @@ ln -sfn "$APP_DIR/current/player-venv/bin/sendspin" /usr/local/bin/sendspin
 install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-player.service" "$PLAYER_SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-bluetooth.service" "$BLUETOOTH_SERVICE_FILE"
+install -d -m 0755 "$release_dir/bin"
+install -m 0755 "$SOURCE_DIR/scripts/bluetooth-ingest.sh" "$release_dir/bin/bluetooth-ingest"
 systemctl daemon-reload
 systemctl enable phono-console.service phono-console-player.service phono-console-bluetooth.service
 systemctl restart phono-console.service phono-console-player.service phono-console-bluetooth.service
