@@ -44,6 +44,11 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert 'Restart=always' in (
         ROOT / "systemd" / "phono-console-player.service"
     ).read_text()
+    assert "bluez-alsa-utils" in installer
+    assert "snd-aloop" in installer
+    assert 'PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"' in installer
+    assert "type dmix" not in installer
+    assert (ROOT / "systemd" / "phono-console-bluetooth.service").is_file()
 
 
 def test_dashboard_assets_are_declared_as_package_data() -> None:

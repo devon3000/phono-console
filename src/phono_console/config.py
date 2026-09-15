@@ -24,6 +24,25 @@ class DetectionConfig:
 
 
 @dataclass(frozen=True)
+class BluetoothConfig:
+    enabled: bool = False
+    capture_device: str = "bluealsa"
+    threshold_dbfs: float = -60.0
+    attack_ms: int = 200
+    release_ms: int = 2000
+    adapter: str = "hci0"
+    alias: str = "Phono Console"
+    pairing_window_seconds: int = 120
+
+
+@dataclass(frozen=True)
+class RoutingConfig:
+    distribution_target: str = "Downstairs"
+    local_fallback_enabled: bool = True
+    distribution_recovery_hold_ms: int = 10_000
+
+
+@dataclass(frozen=True)
 class MusicAssistantConfig:
     base_url: str
     console_player: str
@@ -55,6 +74,8 @@ class Config:
     detection: DetectionConfig
     music_assistant: MusicAssistantConfig
     sendspin: SendspinConfig
+    bluetooth: BluetoothConfig = BluetoothConfig()
+    routing: RoutingConfig = RoutingConfig()
     runtime: RuntimeConfig = RuntimeConfig()
 
 
@@ -74,6 +95,8 @@ def load_config(path: Path) -> Config:
     ma = raw.get("music_assistant", {})
     sendspin = raw.get("sendspin", {})
     runtime = raw.get("runtime", {})
+    bluetooth = raw.get("bluetooth", {})
+    routing = raw.get("routing", {})
 
     config = Config(
         audio=AudioConfig(
@@ -111,6 +134,32 @@ def load_config(path: Path) -> Config:
                 sendspin.get("state_dir", "/var/lib/phono-console/source")
             ),
         ),
+        bluetooth=BluetoothConfig(
+            enabled=bool(bluetooth.get("enabled", False)),
+            capture_device=str(bluetooth.get("capture_device", "bluealsa")),
+            threshold_dbfs=float(bluetooth.get("threshold_dbfs", -60.0)),
+            attack_ms=int(bluetooth.get("attack_ms", 200)),
+            release_ms=int(bluetooth.get("release_ms", 2000)),
+            adapter=str(bluetooth.get("adapter", "hci0")),
+            alias=str(bluetooth.get("alias", "Phono Console")),
+            pairing_window_seconds=int(
+                bluetooth.get("pairing_window_seconds", 120)
+            ),
+        ),
+        routing=RoutingConfig(
+            distribution_target=str(
+                routing.get(
+                    "distribution_target",
+                    ma.get("whole_house_players", ["Downstairs"])[0],
+                )
+            ),
+            local_fallback_enabled=bool(
+                routing.get("local_fallback_enabled", True)
+            ),
+            distribution_recovery_hold_ms=int(
+                routing.get("distribution_recovery_hold_ms", 10_000)
+            ),
+        ),
         runtime=RuntimeConfig(
             poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
             api_host=str(runtime.get("api_host", "0.0.0.0")),
@@ -135,6 +184,14 @@ def _validate(config: Config) -> None:
         raise ValueError("detection attack/release times cannot be negative")
     if config.detection.hysteresis_db < 0:
         raise ValueError("detection.hysteresis_db cannot be negative")
+    if config.bluetooth.attack_ms < 0 or config.bluetooth.release_ms < 0:
+        raise ValueError("bluetooth attack/release times cannot be negative")
+    if not 10 <= config.bluetooth.pairing_window_seconds <= 600:
+        raise ValueError("bluetooth.pairing_window_seconds must be between 10 and 600")
+    if not config.routing.distribution_target:
+        raise ValueError("routing.distribution_target must be non-empty")
+    if config.routing.distribution_recovery_hold_ms < 0:
+        raise ValueError("routing.distribution_recovery_hold_ms cannot be negative")
     if not 10 <= config.runtime.poll_interval_ms <= 5000:
         raise ValueError("runtime.poll_interval_ms must be between 10 and 5000")
     if not 1 <= config.runtime.api_port <= 65535:

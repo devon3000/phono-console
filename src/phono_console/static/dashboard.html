@@ -28,8 +28,9 @@
       </div>
       <div class="route-flags">
         <div><span id="phono-dot" class="status-dot"></span>PHONO INPUT</div>
+        <div><span id="bluetooth-dot" class="status-dot"></span>BLUETOOTH</div>
         <div><span id="ma-play-dot" class="status-dot"></span>MA PLAYBACK</div>
-        <div><span id="house-dot" class="status-dot"></span>WHOLE HOUSE</div>
+        <div><span id="house-dot" class="status-dot"></span>DOWNSTAIRS VIA MA</div>
       </div>
     </section>
 
@@ -114,13 +115,13 @@
       </article>
 
       <article class="panel info-panel controls-panel">
-        <div class="panel-heading"><h2>Whole house</h2><span class="label">CONTROL</span></div>
-        <p class="muted">Publish the turntable through Music Assistant to the configured group.</p>
+        <div class="panel-heading"><h2>Automatic routing</h2><span class="label">DISTRIBUTION</span></div>
+        <p class="muted">Signal selects the source automatically. Phono and Bluetooth play on Downstairs through Music Assistant; direct local output is the outage fallback.</p>
         <div class="button-row">
-          <button id="house-start" class="primary-button" type="button">PLAY VINYL</button>
-          <button id="house-stop" class="secondary-button" type="button">STOP</button>
+          <button id="pairing-open" class="primary-button" type="button">PAIR PHONE</button>
+          <button id="pairing-close" class="secondary-button" type="button">CLOSE PAIRING</button>
         </div>
-        <p id="control-result" class="control-result" aria-live="polite"></p>
+        <p id="control-result" class="control-result" aria-live="polite">No manual source selection required.</p>
       </article>
 
       <article class="panel info-panel events-panel">

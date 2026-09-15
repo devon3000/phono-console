@@ -192,6 +192,34 @@ def test_phono_activity_is_reported_as_line_sense_signal() -> None:
     asyncio.run(scenario())
 
 
+def test_bluetooth_activity_is_reported_as_line_sense_signal() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        state = StateStore()
+        publisher, _, _ = make_publisher(client, state)
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.03)
+
+        await state.set_status(
+            Status(
+                Route.LOCAL_BLUETOOTH,
+                False,
+                False,
+                False,
+                -120.0,
+                bluetooth_active=True,
+                bluetooth_level_dbfs=-20.0,
+            )
+        )
+        await asyncio.sleep(0.05)
+        stop.set()
+        await asyncio.wait_for(run, timeout=2)
+        assert "present" in [signal.value for signal in client.signals]
+
+    asyncio.run(scenario())
+
+
 def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
     async def scenario() -> None:
         client = FakeClient()

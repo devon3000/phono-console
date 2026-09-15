@@ -9,9 +9,11 @@ let requestActive = false;
 
 const routeLabels = {
   idle: ["Ready", "IDLE", "Waiting for an audio source"],
-  local_phono: ["Playing record", "LOCAL PHONO", "Turntable → console speakers"],
+  local_phono: ["Playing record", "LOCAL FALLBACK", "Turntable → console speakers (MA unavailable)"],
+  local_bluetooth: ["Bluetooth", "LOCAL FALLBACK", "Bluetooth → console speakers (MA unavailable)"],
   ma_playback: ["Music Assistant", "MA PLAYBACK", "Network audio → console speakers"],
-  whole_house_phono: ["Whole-house vinyl", "WHOLE HOUSE", "Turntable → Music Assistant group"],
+  distributed_phono: ["Playing record", "DOWNSTAIRS", "Turntable → Music Assistant → Downstairs"],
+  distributed_bluetooth: ["Bluetooth", "DOWNSTAIRS", "Bluetooth → Music Assistant → Downstairs"],
 };
 
 function headers(json = false) {
@@ -92,8 +94,9 @@ function renderRoute(status, wholeHouse) {
   byId("route-name").textContent = labels[1];
   byId("route-detail").textContent = labels[2];
   setFlag("phono-dot", Boolean(status?.phono_active));
+  setFlag("bluetooth-dot", Boolean(status?.bluetooth_active));
   setFlag("ma-play-dot", Boolean(status?.ma_playing));
-  setFlag("house-dot", Boolean(wholeHouse));
+  setFlag("house-dot", status?.distribution === "ma_downstairs");
 }
 
 function renderMeters(status, levels) {
@@ -183,8 +186,21 @@ function render(data) {
   renderMeters(data.status, data.input_levels);
   renderConnections(data);
   renderEvents(data.events);
-  byId("house-start").disabled = Boolean(data.whole_house_requested);
-  byId("house-stop").disabled = !data.whole_house_requested;
+  const pairing = Boolean(data.bluetooth?.pairing);
+  byId("pairing-open").disabled = pairing;
+  byId("pairing-close").disabled = !pairing;
+  byId("control-result").textContent = pairing
+    ? "Bluetooth pairing is open temporarily. Select Phono Console on your phone."
+    : "Sources are selected automatically from their signal.";
+}
+
+async function setPairing(enabled) {
+  try {
+    await api("/v1/bluetooth/pairing", {method: "PUT", body: JSON.stringify({enabled})});
+    await poll();
+  } catch (error) {
+    byId("control-result").textContent = error.message;
+  }
 }
 
 async function poll() {
@@ -202,19 +218,6 @@ async function poll() {
   }
 }
 
-async function setWholeHouse(enabled) {
-  const result = byId("control-result");
-  result.textContent = enabled ? "Starting whole-house vinyl…" : "Stopping…";
-  byId("house-start").disabled = true;
-  byId("house-stop").disabled = true;
-  try {
-    await api("/v1/whole-house", {method: "PUT", body: JSON.stringify({enabled})});
-    result.textContent = enabled ? "Whole-house request accepted." : "Playback stopped.";
-    await poll();
-  } catch (error) {
-    result.textContent = error.message;
-  }
-}
 
 tokenForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -238,8 +241,8 @@ byId("reset-levels").addEventListener("click", async () => {
     byId("control-result").textContent = error.message;
   }
 });
-byId("house-start").addEventListener("click", () => setWholeHouse(true));
-byId("house-stop").addEventListener("click", () => setWholeHouse(false));
+byId("pairing-open").addEventListener("click", () => setPairing(true));
+byId("pairing-close").addEventListener("click", () => setPairing(false));
 
 poll();
 pollTimer = setInterval(poll, 250);

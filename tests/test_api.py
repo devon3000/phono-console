@@ -139,3 +139,39 @@ def test_api_rejects_unavailable_whole_house_source() -> None:
             await client.close()
 
     asyncio.run(scenario())
+
+
+def test_api_controls_time_limited_bluetooth_pairing() -> None:
+    async def scenario() -> None:
+        calls = []
+
+        async def opened() -> None:
+            calls.append("open")
+
+        async def closed() -> None:
+            calls.append("close")
+
+        api = ControlApi(
+            StateStore(),
+            None,
+            pairing_open_action=opened,
+            pairing_close_action=closed,
+        )
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            assert (
+                await client.put(
+                    "/v1/bluetooth/pairing", json={"enabled": True}
+                )
+            ).status == 200
+            assert (
+                await client.put(
+                    "/v1/bluetooth/pairing", json={"enabled": False}
+                )
+            ).status == 200
+            assert calls == ["open", "close"]
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())

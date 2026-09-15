@@ -28,6 +28,7 @@ class StateStore:
         self.whole_house_requested = False
         self.sendspin_source: dict[str, object] = {}
         self.music_assistant: dict[str, object] = {}
+        self.bluetooth: dict[str, object] = {}
         self.system: dict[str, object] = {}
         self.input_levels: dict[str, object] | None = None
         self.components: dict[str, dict[str, object]] = {}
@@ -76,6 +77,11 @@ class StateStore:
     async def set_music_assistant_state(self, state: dict[str, object]) -> None:
         async with self.changed:
             self.music_assistant = dict(state)
+            self.changed.notify_all()
+
+    async def set_bluetooth_state(self, state: dict[str, object]) -> None:
+        async with self.changed:
+            self.bluetooth = dict(state)
             self.changed.notify_all()
 
     async def set_system_info(self, info: dict[str, object]) -> None:
@@ -141,6 +147,7 @@ class StateStore:
             "whole_house_requested": self.whole_house_requested,
             "sendspin_source": dict(self.sendspin_source),
             "music_assistant": dict(self.music_assistant),
+            "bluetooth": dict(self.bluetooth),
             "system": dict(self.system),
             "input_levels": self.input_levels,
             "health": health,

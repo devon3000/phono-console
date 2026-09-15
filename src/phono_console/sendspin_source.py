@@ -19,6 +19,7 @@ from pathlib import Path
 from .alsa import CaptureUnavailable
 from .config import AudioConfig, SendspinConfig
 from .interfaces import EventSink
+from .policy import Source
 from .state import StateStore
 
 LOGGER = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class SendspinSourcePublisher:
         pcm_stream_factory: PcmStreamFactory | None = None,
         reconnect_seconds: float = 5.0,
         signal_poll_seconds: float = 0.5,
+        source_devices: dict[Source, str] | None = None,
     ) -> None:
         self.config = sendspin
         self.audio = audio
@@ -127,17 +129,36 @@ class SendspinSourcePublisher:
         self._stream_requested = False
         self._stream_retry_task: asyncio.Task[None] | None = None
         self._stream_error: str | None = None
+        self._selected_source = Source.PHONO
+        self._source_devices = source_devices or {
+            Source.PHONO: audio.capture_device,
+        }
 
     def _default_pcm_stream(self) -> AsyncIterator[bytes]:
         # 20 ms chunks keep feed timestamps fine-grained without hammering
         # the websocket.
         chunk_frames = max(1, self.audio.sample_rate // 50)
         return arecord_pcm_stream(
-            self.audio.capture_device,
+            self._source_devices[self._selected_source],
             self.audio.sample_rate,
             self.audio.channels,
             chunk_frames,
         )
+
+    async def select_source(self, source: Source) -> None:
+        """Select the automatically winning local source for publication."""
+        if source not in self._source_devices:
+            raise ValueError(f"source is not publishable: {source.value}")
+        if source is self._selected_source:
+            return
+        was_requested = self._stream_requested
+        await self._stop_streaming()
+        self._selected_source = source
+        self._stream_requested = was_requested
+        await self.events.emit("sendspin_source_selected", {"source": source.value})
+        if was_requested:
+            await self._start_streaming()
+        await self._publish_state()
 
     async def _default_client_factory(self) -> object:
         from aiosendspin.client import PairingSupport, SendspinClient
@@ -185,6 +206,7 @@ class SendspinSourcePublisher:
                 "client_id": self.client_id,
                 "stream_requested": self._stream_requested,
                 "error": self._stream_error,
+                "selected_source": self._selected_source.value,
             }
         )
         await self.state.set_component(
@@ -353,7 +375,11 @@ class SendspinSourcePublisher:
         last: bool | None = None
         while not stop.is_set():
             status = self.state.status
-            active = bool(status.phono_active) if status is not None else False
+            active = (
+                bool(status.phono_active or status.bluetooth_active)
+                if status is not None
+                else False
+            )
             if self._connected and active != last:
                 await self._send_signal(active)
                 last = active

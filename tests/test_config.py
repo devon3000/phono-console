@@ -14,3 +14,7 @@ def test_example_configuration_loads() -> None:
     assert config.sendspin.source_enabled
     assert config.sendspin.state_dir == "/var/lib/phono-console/source"
     assert config.music_assistant.whole_house_players == ("Downstairs",)
+    assert config.bluetooth.capture_device == "bluealsa"
+    assert not config.bluetooth.enabled
+    assert config.routing.distribution_target == "Downstairs"
+    assert config.routing.local_fallback_enabled

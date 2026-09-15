@@ -8,6 +8,7 @@ ENV_FILE="$CONFIG_DIR/environment"
 PLAYER_ENV_FILE="$CONFIG_DIR/player.env"
 SERVICE_FILE="/etc/systemd/system/phono-console.service"
 PLAYER_SERVICE_FILE="/etc/systemd/system/phono-console-player.service"
+BLUETOOTH_SERVICE_FILE="/etc/systemd/system/phono-console-bluetooth.service"
 ALSA_FILE="/etc/alsa/conf.d/99-phono-console.conf"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 config_backup=""
@@ -96,16 +97,22 @@ choose_audio_device() {
 echo "Installing system packages..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  alsa-utils curl libportaudio2 python3 python3-venv
+  alsa-utils bluez bluez-alsa-utils curl libportaudio2 python3 python3-venv rfkill
+
+modprobe snd-aloop
+cat >/etc/modules-load.d/phono-console.conf <<'EOF'
+snd-aloop
+EOF
 
 if ! getent group phono-console >/dev/null; then
   groupadd --system phono-console
 fi
+getent group bluetooth >/dev/null || groupadd --system bluetooth
 if ! id phono-console >/dev/null 2>&1; then
-  useradd --system --gid phono-console --groups audio \
+  useradd --system --gid phono-console --groups audio,bluetooth \
     --home-dir /var/lib/phono-console --shell /usr/sbin/nologin phono-console
 else
-  usermod -a -G audio phono-console
+  usermod -a -G audio,bluetooth phono-console
 fi
 install -d -o phono-console -g phono-console -m 0750 /var/lib/phono-console
 chown -R phono-console:phono-console /var/lib/phono-console
@@ -193,21 +200,43 @@ fi
 playback_device="$raw_playback_device"
 if [[ "$raw_playback_device" == hw:* ]]; then
   cat >>"$ALSA_FILE" <<EOF
-pcm.phono_playback {
-  type dmix
-  ipc_key 24681
+pcm.phono_direct {
+  type plug
+  slave.pcm "$raw_playback_device"
+}
+EOF
+  playback_device="phono_direct"
+fi
+cat >>"$ALSA_FILE" <<'EOF'
+pcm.console_ma_playback {
+  type plug
+  slave.pcm "hw:Loopback,0,0"
+}
+pcm.console_ma_capture {
+  type plug
+  slave.pcm "hw:Loopback,1,0"
+}
+pcm.console_bt_playback {
+  type plug
+  slave.pcm "hw:Loopback,0,1"
+}
+pcm.console_bt_capture_raw {
+  type dsnoop
+  ipc_key 24682
   slave {
-    pcm "$raw_playback_device"
+    pcm "hw:Loopback,1,1"
     rate 48000
     channels 2
   }
 }
+pcm.console_bt_capture {
+  type plug
+  slave.pcm "console_bt_capture_raw"
+}
 EOF
-  playback_device="phono_playback"
-fi
 ma_url="$(prompt "Music Assistant URL" "http://music-assistant.local")"
 ma_player="$(prompt "Music Assistant console player" "Phono Console")"
-vinyl_source="$(prompt "Music Assistant vinyl source" "Console Vinyl")"
+vinyl_source="$(prompt "Music Assistant console input" "Console Input")"
 whole_house_group="$(prompt "Whole-house player group" "Downstairs")"
 sendspin_url="$(prompt "Sendspin server URL" "ws://music-assistant.local:8927/sendspin")"
 
@@ -232,6 +261,21 @@ attack_ms = 250
 release_ms = 5000
 hysteresis_db = 6.0
 
+[bluetooth]
+enabled = true
+capture_device = "console_bt_capture"
+threshold_dbfs = -60.0
+attack_ms = 200
+release_ms = 2000
+adapter = "hci0"
+alias = "Phono Console"
+pairing_window_seconds = 120
+
+[routing]
+distribution_target = "$(toml_escape "$whole_house_group")"
+local_fallback_enabled = true
+distribution_recovery_hold_ms = 10000
+
 [music_assistant]
 base_url = "$(toml_escape "$ma_url")"
 console_player = "$(toml_escape "$ma_player")"
@@ -253,6 +297,78 @@ api_port = 8765
 api_token_env = "PHONO_CONSOLE_API_TOKEN"
 EOF
 fi
+
+if ! grep -q '^\[bluetooth\]' "$CONFIG_FILE"; then
+  cat >>"$CONFIG_FILE" <<'EOF'
+
+[bluetooth]
+enabled = true
+capture_device = "console_bt_capture"
+threshold_dbfs = -60.0
+attack_ms = 200
+release_ms = 2000
+adapter = "hci0"
+alias = "Phono Console"
+pairing_window_seconds = 120
+EOF
+fi
+if ! grep -q '^\[routing\]' "$CONFIG_FILE"; then
+  cat >>"$CONFIG_FILE" <<EOF
+
+[routing]
+distribution_target = "$(toml_escape "$whole_house_group")"
+local_fallback_enabled = true
+distribution_recovery_hold_ms = 10000
+EOF
+fi
+sed -i 's/^source_name = "Console Vinyl"/source_name = "Console Input"/' "$CONFIG_FILE"
+
+# Migrate the earlier dmix playback alias to the measured lower-latency direct
+# plug path. Resolve the old slave before replacing/augmenting the file.
+if [[ "$playback_device" == "phono_playback" && -f "$ALSA_FILE" ]]; then
+  legacy_playback="$(awk '
+    /^pcm\.phono_playback[[:space:]]*\{/ { in_block=1; next }
+    in_block && /pcm[[:space:]]+"/ {
+      line=$0; sub(/^.*pcm[[:space:]]+"/, "", line); sub(/".*$/, "", line)
+      print line; exit
+    }
+    in_block && /^}/ { in_block=0 }
+  ' "$ALSA_FILE")"
+  if [[ "$legacy_playback" == hw:* ]]; then
+    cat >>"$ALSA_FILE" <<EOF
+pcm.phono_direct {
+  type plug
+  slave.pcm "$legacy_playback"
+}
+EOF
+    playback_device="phono_direct"
+    sed -i 's/^playback_device = "phono_playback"/playback_device = "phono_direct"/' \
+      "$CONFIG_FILE"
+  fi
+fi
+
+# Internal buses keep the standalone Sendspin player and Bluetooth transport
+# away from the physical output. The router is the sole direct-output owner.
+if ! grep -q '^pcm\.console_ma_playback' "$ALSA_FILE" 2>/dev/null; then
+  cat >>"$ALSA_FILE" <<'EOF'
+pcm.console_ma_playback { type plug slave.pcm "hw:Loopback,0,0" }
+pcm.console_ma_capture { type plug slave.pcm "hw:Loopback,1,0" }
+pcm.console_bt_playback { type plug slave.pcm "hw:Loopback,0,1" }
+pcm.console_bt_capture_raw {
+  type dsnoop
+  ipc_key 24682
+  slave { pcm "hw:Loopback,1,1" rate 48000 channels 2 }
+}
+pcm.console_bt_capture { type plug slave.pcm "console_bt_capture_raw" }
+EOF
+fi
+
+# BlueALSA is the only Bluetooth audio backend for this appliance. Restrict it
+# to receiving high-quality A2DP media; telephony profiles are intentionally off.
+install -d -m 0755 /etc/default
+cat >/etc/default/bluealsa <<'EOF'
+OPTIONS="-p a2dp-sink"
+EOF
 chown root:phono-console "$CONFIG_FILE"
 chmod 0640 "$CONFIG_FILE"
 
@@ -261,7 +377,7 @@ chmod 0640 "$CONFIG_FILE"
 cat >"$PLAYER_ENV_FILE" <<EOF
 PHONO_PLAYER_URL="$(toml_escape "$sendspin_url")"
 PHONO_PLAYER_NAME="$(toml_escape "$ma_player")"
-PHONO_PLAYER_AUDIO_DEVICE="$(toml_escape "$playback_device")"
+PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"
 EOF
 chown root:phono-console "$PLAYER_ENV_FILE"
 chmod 0640 "$PLAYER_ENV_FILE"
@@ -308,9 +424,10 @@ ln -sfn "$APP_DIR/current/player-venv/bin/sendspin" /usr/local/bin/sendspin
 
 install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-player.service" "$PLAYER_SERVICE_FILE"
+install -m 0644 "$SOURCE_DIR/systemd/phono-console-bluetooth.service" "$BLUETOOTH_SERVICE_FILE"
 systemctl daemon-reload
-systemctl enable phono-console.service phono-console-player.service
-systemctl restart phono-console.service phono-console-player.service
+systemctl enable phono-console.service phono-console-player.service phono-console-bluetooth.service
+systemctl restart phono-console.service phono-console-player.service phono-console-bluetooth.service
 healthy=false
 healthy_count=0
 for _attempt in $(seq 1 30); do

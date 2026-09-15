@@ -8,6 +8,8 @@ echo "arecord:       $(command -v arecord || echo MISSING)"
 echo "aplay:         $(command -v aplay || echo MISSING)"
 echo "alsaloop:      $(command -v alsaloop || echo MISSING)"
 echo "sendspin:      $(command -v sendspin || echo MISSING)"
+echo "bluetoothctl:  $(command -v bluetoothctl || echo MISSING)"
+echo "bluealsa:      $(command -v bluealsa || command -v bluealsad || echo MISSING)"
 echo "config:        $CONFIG_FILE"
 
 if [[ ! -r "$CONFIG_FILE" ]]; then
@@ -23,6 +25,9 @@ systemctl is-enabled phono-console.service
 systemctl is-active phono-console.service
 systemctl is-enabled phono-console-player.service
 systemctl is-active phono-console-player.service
+systemctl is-enabled phono-console-bluetooth.service
+systemctl is-active phono-console-bluetooth.service || \
+  echo "Bluetooth ingest is waiting for an A2DP source."
 
 ENV_FILE="/etc/phono-console/environment"
 api_token="$(awk -F= '$1 == "PHONO_CONSOLE_API_TOKEN" {

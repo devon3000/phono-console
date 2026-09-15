@@ -11,6 +11,7 @@ from aiohttp import web
 
 from .alsa import ArecordLevelMonitor
 from .api import ControlApi, WholeHouseError
+from .bluetooth import BluetoothManager
 from .config import Config
 from .controller import Controller
 from .event_sinks import CompositeEventSink
@@ -18,6 +19,7 @@ from .events import LoggingEventSink
 from .ma import MusicAssistantState
 from .processes import ManagedProcess, ProcessSpec, SubprocessLauncher
 from .router import ProcessAudioRouter
+from .policy import Source
 from .sendspin_source import SendspinSourcePublisher
 from .state import StateStore
 
@@ -81,17 +83,48 @@ def local_loopback_command(config: Config) -> tuple[str, ...]:
     )
 
 
+def bluetooth_loopback_command(config: Config) -> tuple[str, ...]:
+    audio = config.audio
+    return (
+        "alsaloop", "-C", config.bluetooth.capture_device,
+        "-P", audio.playback_device, "-f", "S16_LE",
+        "-r", str(audio.sample_rate), "-c", str(audio.channels),
+        "-t", str(audio.target_latency_ms * 1000),
+    )
+
+
+def ma_loopback_command(config: Config) -> tuple[str, ...]:
+    audio = config.audio
+    return (
+        "alsaloop", "-C", "console_ma_capture",
+        "-P", audio.playback_device, "-f", "S16_LE",
+        "-r", str(audio.sample_rate), "-c", str(audio.channels),
+        "-t", str(audio.target_latency_ms * 1000),
+    )
+
+
 async def run_daemon(config: Config) -> None:
     state = StateStore()
     events = CompositeEventSink(LoggingEventSink(), state)
     launcher = SubprocessLauncher()
-    router = ProcessAudioRouter(
-        ManagedProcess(
+    phono_loopback = ManagedProcess(
             ProcessSpec("local_loopback", local_loopback_command(config)),
             launcher,
             events,
         )
+    bluetooth_loopback = (
+        ManagedProcess(
+            ProcessSpec("bluetooth_loopback", bluetooth_loopback_command(config)),
+            launcher,
+            events,
+        )
+        if config.bluetooth.enabled
+        else None
     )
+    ma_loopback = ManagedProcess(
+        ProcessSpec("ma_loopback", ma_loopback_command(config)), launcher, events
+    )
+    router = ProcessAudioRouter(phono_loopback, bluetooth_loopback, ma_loopback)
     monitor = ArecordLevelMonitor(
         config.audio.capture_device,
         events,
@@ -107,15 +140,22 @@ async def run_daemon(config: Config) -> None:
         events,
         state,
     )
-    controller = Controller(
-        config, monitor, music_assistant, router, events, status_sink=state
-    )
-
     publisher: SendspinSourcePublisher | None = None
     whole_house_action = None
     if config.sendspin.source_enabled:
         publisher = SendspinSourcePublisher(
-            config.sendspin, config.audio, events, state
+            config.sendspin,
+            config.audio,
+            events,
+            state,
+            source_devices={
+                Source.PHONO: config.audio.capture_device,
+                **(
+                    {Source.BLUETOOTH: config.bluetooth.capture_device}
+                    if config.bluetooth.enabled
+                    else {}
+                ),
+            },
         )
 
         async def whole_house_action(enabled: bool) -> None:
@@ -138,6 +178,49 @@ async def run_daemon(config: Config) -> None:
                 await music_assistant.stop_players(
                     config.music_assistant.whole_house_players
                 )
+
+    bluetooth_monitor = (
+        ArecordLevelMonitor(
+            config.bluetooth.capture_device,
+            events,
+            sample_rate=config.audio.sample_rate,
+            channels=config.audio.channels,
+            window_ms=config.audio.detection_window_ms,
+        )
+        if config.bluetooth.enabled
+        else None
+    )
+
+    def distribution_available() -> bool:
+        return bool(
+            publisher is not None
+            and state.sendspin_source.get("connected")
+            and state.music_assistant.get("connected")
+        )
+
+    async def prepare_distribution(source: Source) -> bool:
+        if publisher is None or publisher.client_id is None:
+            return False
+        await publisher.select_source(source)
+        started = await music_assistant.play_vinyl_source(
+            publisher.client_id, (config.routing.distribution_target,)
+        )
+        return bool(started)
+
+    controller = Controller(
+        config,
+        monitor,
+        music_assistant,
+        router,
+        events,
+        status_sink=state,
+        bluetooth_monitor=bluetooth_monitor,
+        distribution_available=distribution_available,
+        prepare_distribution=prepare_distribution,
+        release_distribution=lambda: music_assistant.stop_players(
+            (config.routing.distribution_target,)
+        ),
+    )
 
     api_token = os.getenv(config.runtime.api_token_env) or None
     validate_api_security(config.runtime.api_host, api_token)
@@ -175,12 +258,22 @@ async def run_daemon(config: Config) -> None:
             "console_player": config.music_assistant.console_player,
         }
     )
+    bluetooth_manager = BluetoothManager(config.bluetooth, events, state)
     api = ControlApi(
         state,
         api_token,
         whole_house_available=config.sendspin.source_enabled,
         whole_house_action=whole_house_action,
         level_reset_action=monitor.session.reset,
+        pairing_open_action=(
+            bluetooth_manager.open_pairing if config.bluetooth.enabled else None
+        ),
+        pairing_close_action=(
+            bluetooth_manager.close_pairing if config.bluetooth.enabled else None
+        ),
+        bluetooth_device_action=(
+            bluetooth_manager.device_action if config.bluetooth.enabled else None
+        ),
     )
     runner = web.AppRunner(api.application())
     await runner.setup()
@@ -200,7 +293,7 @@ async def run_daemon(config: Config) -> None:
         {"api_host": config.runtime.api_host, "api_port": config.runtime.api_port},
     )
     try:
-        tasks = [controller.run(stop)]
+        tasks = [controller.run(stop), bluetooth_manager.run(stop)]
         if publisher is not None:
             tasks.append(publisher.run(stop))
         await asyncio.gather(*tasks)

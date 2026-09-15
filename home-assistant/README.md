@@ -22,5 +22,7 @@
      packages: !include_dir_named packages
    ```
 
-The package exposes route, input level, phono activity, Sendspin connection and
-streaming status, plus explicit actions to start or stop whole-house vinyl.
+The package exposes the automatically selected source, effective distribution
+path, input levels, phono/Bluetooth activity, and Sendspin status. There is no
+manual source control: phono and Bluetooth normally play on `Downstairs`
+through Music Assistant and use direct local output only as an outage fallback.

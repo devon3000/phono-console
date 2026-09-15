@@ -28,3 +28,20 @@ def test_router_runs_loopback_only_for_local_phono() -> None:
         assert not loop.running
 
     asyncio.run(scenario())
+
+
+def test_router_exclusively_runs_the_selected_local_fallback() -> None:
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        phono = ManagedProcess(ProcessSpec("phono", ("phono",)), FakeLauncher(), events)
+        bluetooth = ManagedProcess(ProcessSpec("bluetooth", ("bluetooth",)), FakeLauncher(), events)
+        router = ProcessAudioRouter(phono, bluetooth)
+
+        await router.apply(Route.LOCAL_BLUETOOTH)
+        assert bluetooth.running and not phono.running
+        await router.apply(Route.LOCAL_PHONO)
+        assert phono.running and not bluetooth.running
+        await router.apply(Route.DISTRIBUTED_PHONO)
+        assert not phono.running and not bluetooth.running
+
+    asyncio.run(scenario())

@@ -1,7 +1,7 @@
 # Phono Console
 
-Software-defined audio routing for a turntable console built around one
-Behringer UFO202 and one Raspberry Pi.
+Software-defined audio routing for a turntable/Bluetooth console built around
+one Behringer UFO202 and one Raspberry Pi.
 
 ## Raspberry Pi installation
 
@@ -69,36 +69,36 @@ phono amplifier input, hardware monitor path, or physical input selector.
 
 ## Automatic behavior
 
-- Phono input becomes active: play it locally through a low-latency software
-  loopback.
-- Music Assistant starts playing to the console: play the MA stream instead.
-- Whole-house vinyl is requested: publish the phono capture to Music Assistant
-  using Sendspin source support and play the returned MA stream locally,
-  keeping the console synchronized with the other rooms.
-- Music Assistant stops: resume local vinyl if phono input is still active.
+- Phono signal becomes active: select phono automatically.
+- Otherwise, an actively streaming Bluetooth phone is selected automatically.
+- Otherwise, Music Assistant playback is selected.
+- Phono and Bluetooth are published through Sendspin to the configured
+  `Downstairs` Music Assistant group. The console consumes the synchronized MA
+  return along with the other rooms.
+- If MA, Sendspin, or the network is unavailable, the selected phono/Bluetooth
+  source falls back to the direct local output path.
 - Nothing is active: output silence.
 
-Music Assistant has priority over local phono. Level thresholds, debounce, and
-hold times prevent record noise or brief pauses from causing rapid switching.
+Priority is phono, then actively streaming Bluetooth, then Music Assistant.
+There is no manual source selector. Level thresholds, debounce, and hold times
+prevent record noise, a merely connected phone, or brief pauses from causing
+rapid switching.
 
 ## Current status
 
-The controller now includes configuration loading, phono activity detection,
-source-priority decisions, a supervised loopback process, a real `arecord`
-level monitor, PCM RMS metering, and Music Assistant websocket state tracking.
+The controller includes configuration loading, phono/Bluetooth activity
+detection, automatic priority decisions, supervised loopbacks, PCM metering,
+Bluetooth pairing control, and Music Assistant websocket state tracking.
 Target measured local round-trip latency is under 50 ms.
 
 With `source_enabled = true` (the installer default), the daemon also runs an
-in-process Sendspin source client that publishes the phono capture to Music
-Assistant as a native audio source. It maintains a persistent identity and
+in-process Sendspin source client that publishes the automatically selected
+phono or Bluetooth capture to Music Assistant as `Console Input`. It maintains a persistent identity and
 pairing store under `/var/lib/phono-console/source`, streams only when the
 Music Assistant `sendspin_source` plugin requests it, and reports line-sense
-signal state from phono activity so Music Assistant can auto-start a
-configured target. Pairing is initiated from the Music Assistant UI; the
-headless client accepts the pairing attempt automatically and remembers it.
-Whole-house vinyl is therefore normally driven from Music Assistant or Home
-Assistant ("play the record player downstairs"); the daemon's own API can also
-trigger it on the configured `whole_house_players` group.
+signal state from source activity. Pairing with Music Assistant is initiated
+once in its UI and remembered. The controller then starts Console Input on the
+fixed `Downstairs` target automatically whenever phono or Bluetooth wins.
 
 Run the target probe on the Raspberry Pi with:
 
@@ -144,8 +144,11 @@ initial endpoints are:
   are operational
 - `GET /v1/status`
 - `POST /v1/levels/reset` — clears peak maxima and clipping latches
+- `PUT /v1/bluetooth/pairing` — opens or closes the time-limited pairing window
+- `POST /v1/bluetooth/device` — disconnects or forgets a paired device
 - `PUT /v1/whole-house` with `{\"enabled\": true|false}` — starts or stops the
-  published vinyl source on the configured `whole_house_players`.
+  published vinyl source on the configured `whole_house_players` (legacy
+  compatibility; normal source distribution is automatic).
 
 A ready-to-copy Home Assistant package and setup instructions are in
 [home-assistant/](home-assistant/).
@@ -154,12 +157,12 @@ The same service hosts a responsive dashboard at `http://PHONO_CONSOLE_IP:8765/`
 Enter the generated API token once per browser tab to see the active route,
 stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
 Sendspin connectivity, component health/errors, configured devices, version,
-uptime, network identity, recent events, and whole-house controls. Local-phono
+uptime, network identity, recent events, pairing, and distribution status. Local
 output is shown as an explicitly labeled unity-gain input
 mirror; the standalone Sendspin player does not currently expose PCM telemetry,
 so MA output levels are marked unavailable rather than estimated.
 
-Whole-house capture uses native Sendspin source-role support (Music Assistant
+Distributed capture uses native Sendspin source-role support (Music Assistant
 2.10.2 or later with the `sendspin_source` plugin); there is deliberately no
 HTTP-radio or transcoding fallback.
 

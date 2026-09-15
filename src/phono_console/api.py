@@ -11,6 +11,8 @@ from .state import StateStore
 
 WholeHouseAction = Callable[[bool], Awaitable[None]]
 LevelResetAction = Callable[[], None]
+PairingAction = Callable[[], Awaitable[None]]
+BluetoothDeviceAction = Callable[[str, str], Awaitable[None]]
 PUBLIC_PATHS = frozenset(("/", "/assets/dashboard.css", "/assets/dashboard.js"))
 
 
@@ -27,12 +29,18 @@ class ControlApi:
         whole_house_available: bool = True,
         whole_house_action: WholeHouseAction | None = None,
         level_reset_action: LevelResetAction | None = None,
+        pairing_open_action: PairingAction | None = None,
+        pairing_close_action: PairingAction | None = None,
+        bluetooth_device_action: BluetoothDeviceAction | None = None,
     ) -> None:
         self.state = state
         self.token = token
         self.whole_house_available = whole_house_available
         self.whole_house_action = whole_house_action
         self.level_reset_action = level_reset_action
+        self.pairing_open_action = pairing_open_action
+        self.pairing_close_action = pairing_close_action
+        self.bluetooth_device_action = bluetooth_device_action
         self._whole_house_lock = asyncio.Lock()
 
     @web.middleware
@@ -88,6 +96,38 @@ class ControlApi:
         await self.state.reset_input_level_history()
         await self.state.emit("input_level_history_reset", {"source": "api"})
         return web.json_response({"reset": True})
+
+    async def set_bluetooth_pairing(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        enabled = body.get("enabled")
+        if not isinstance(enabled, bool):
+            raise web.HTTPBadRequest(text="enabled must be a boolean")
+        action = self.pairing_open_action if enabled else self.pairing_close_action
+        if action is None:
+            raise web.HTTPConflict(text="Bluetooth is disabled")
+        try:
+            await action()
+        except Exception as exc:
+            raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+        return web.json_response({"enabled": enabled})
+
+    async def bluetooth_device(self, request: web.Request) -> web.Response:
+        if self.bluetooth_device_action is None:
+            raise web.HTTPConflict(text="Bluetooth is disabled")
+        body = await request.json()
+        address = body.get("address")
+        action = body.get("action")
+        if not isinstance(address, str) or action not in {"disconnect", "forget"}:
+            raise web.HTTPBadRequest(text="address and disconnect/forget action required")
+        try:
+            await self.bluetooth_device_action(
+                "remove" if action == "forget" else action, address
+            )
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        except Exception as exc:
+            raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+        return web.json_response({"address": address, "action": action})
 
     async def set_whole_house(self, request: web.Request) -> web.Response:
         body = await request.json()
@@ -159,6 +199,8 @@ class ControlApi:
                 web.get("/health/ready", self.ready),
                 web.get("/v1/status", self.get_status),
                 web.post("/v1/levels/reset", self.reset_levels),
+                web.put("/v1/bluetooth/pairing", self.set_bluetooth_pairing),
+                web.post("/v1/bluetooth/device", self.bluetooth_device),
                 web.put("/v1/whole-house", self.set_whole_house),
             ]
         )

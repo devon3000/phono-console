@@ -15,6 +15,14 @@ rest:
         unit_of_measurement: "dBFS"
         value_template: >-
           {{ value_json.status.level_dbfs | round(1) if value_json.status else -120 }}
+      - name: "Phono Console Source"
+        unique_id: phono_console_source
+        value_template: >-
+          {{ value_json.status.source if value_json.status else 'none' }}
+      - name: "Phono Console Distribution"
+        unique_id: phono_console_distribution
+        value_template: >-
+          {{ value_json.status.distribution if value_json.status else 'none' }}
     binary_sensor:
       - name: "Phono Console Input Active"
         unique_id: phono_console_input_active
@@ -29,19 +37,7 @@ rest:
         unique_id: phono_console_source_streaming
         value_template: >-
           {{ value_json.sendspin_source.streaming | default(false) }}
-
-rest_command:
-  phono_console_whole_house_start:
-    url: "http://PHONO_CONSOLE_IP:8765/v1/whole-house"
-    method: PUT
-    headers:
-      Authorization: !secret phono_console_authorization
-      Content-Type: "application/json"
-    payload: '{"enabled": true}'
-  phono_console_whole_house_stop:
-    url: "http://PHONO_CONSOLE_IP:8765/v1/whole-house"
-    method: PUT
-    headers:
-      Authorization: !secret phono_console_authorization
-      Content-Type: "application/json"
-    payload: '{"enabled": false}'
+      - name: "Phono Console Bluetooth Active"
+        unique_id: phono_console_bluetooth_active
+        value_template: >-
+          {{ value_json.status.bluetooth_active if value_json.status else false }}

@@ -36,9 +36,8 @@ def test_controller_applies_only_changed_routes() -> None:
 
         ma.playing = True
         await subject.tick(now=3)
-        assert router.routes[-1] is Route.MA_PLAYBACK
+        assert router.routes[-1] is Route.LOCAL_PHONO
         assert [event for event, _ in events.events] == [
-            "route_changed",
             "route_changed",
             "route_changed",
         ]
@@ -109,5 +108,69 @@ def test_capture_loss_immediately_stops_an_active_local_route() -> None:
         await subject.tick(now=0.3)
         assert subject.route is Route.IDLE
         assert router.routes[-1] is Route.IDLE
+
+    asyncio.run(scenario())
+
+
+def test_distribution_recovery_is_held_then_prepared_automatically() -> None:
+    async def scenario() -> None:
+        level = SimulatedLevelMonitor()
+        level.level = -20.0
+        router = SimulatedAudioRouter()
+        prepared = []
+
+        async def prepare(source):
+            prepared.append(source.value)
+            return True
+
+        subject = Controller(
+            config(),
+            level,
+            SimulatedMusicAssistant(),
+            router,
+            SimulatedEventSink(),
+            distribution_available=lambda: True,
+            prepare_distribution=prepare,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.LOCAL_PHONO
+        await subject.tick(now=10.0)
+        assert subject.route is Route.DISTRIBUTED_PHONO
+        assert prepared == ["phono"]
+
+    asyncio.run(scenario())
+
+
+def test_distribution_is_released_when_source_signal_ends() -> None:
+    async def scenario() -> None:
+        level = SimulatedLevelMonitor()
+        level.level = -20.0
+        released = []
+
+        async def prepare(_source):
+            return True
+
+        async def release():
+            released.append(True)
+
+        subject = Controller(
+            config(),
+            level,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            distribution_available=lambda: True,
+            prepare_distribution=prepare,
+            release_distribution=release,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=10)
+        assert subject.route is Route.DISTRIBUTED_PHONO
+        level.level = -120.0
+        await subject.tick(now=16)
+        await subject.tick(now=22)
+        assert subject.route is Route.IDLE
+        assert released == [True]
 
     asyncio.run(scenario())
