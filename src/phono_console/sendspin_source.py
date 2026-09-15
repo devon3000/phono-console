@@ -387,10 +387,10 @@ class SendspinSourcePublisher:
             await self.events.emit("sendspin_source_stream_stopped", {})
             await self._publish_state()
 
-    async def _send_signal(self, present: bool) -> None:
+    async def _send_signal(self, present: bool) -> bool:
         client = self._client
         if client is None or not self._connected:
-            return
+            return False
         from aiosendspin.models.types import SignalState
 
         signal = SignalState.PRESENT if present else SignalState.ABSENT
@@ -401,9 +401,23 @@ class SendspinSourcePublisher:
             connection = getattr(client, "_admitted_connection", None)
             sender = getattr(connection, "send_source_signal", None)
         if sender is None:
-            return
-        with suppress(Exception):
+            await self.events.emit(
+                "sendspin_source_signal_failed",
+                {"signal": signal.value, "error": "client has no signal sender"},
+            )
+            return False
+        try:
             await sender(signal)
+        except Exception as exc:
+            await self.events.emit(
+                "sendspin_source_signal_failed",
+                {"signal": signal.value, "error": str(exc)},
+            )
+            return False
+        await self.events.emit(
+            "sendspin_source_signal_sent", {"signal": signal.value}
+        )
+        return True
 
     async def _watch_signal(self, stop: asyncio.Event) -> None:
         last: bool | None = None
@@ -439,8 +453,8 @@ class SendspinSourcePublisher:
             else:
                 active = False
             if self._connected and active != last:
-                await self._send_signal(active)
-                last = active
+                if await self._send_signal(active):
+                    last = active
             elif not self._connected:
                 # Resend after the next reconnect.
                 last = None

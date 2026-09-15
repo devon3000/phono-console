@@ -254,6 +254,35 @@ def test_brief_bluetooth_gap_does_not_clear_line_sense() -> None:
     asyncio.run(scenario())
 
 
+def test_failed_line_sense_send_is_retried() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        attempts = 0
+
+        async def flaky_signal(signal) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("source role not ready")
+            client.signals.append(signal)
+
+        client.send_source_signal = flaky_signal
+        publisher, events, state = make_publisher(client)
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.06)
+
+        stop.set()
+        await asyncio.wait_for(run, timeout=2)
+        assert attempts >= 2
+        assert [signal.value for signal in client.signals] == ["absent"]
+        assert any(
+            name == "sendspin_source_signal_failed" for name, _ in events.events
+        )
+
+    asyncio.run(scenario())
+
+
 def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
     async def scenario() -> None:
         client = FakeClient()
