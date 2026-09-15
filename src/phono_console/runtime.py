@@ -305,7 +305,9 @@ async def run_daemon(config: Config) -> None:
         ),
         local_only_action=local_only_action,
     )
-    runner = web.AppRunner(api.application())
+    # Dashboard polling happens four times per second and otherwise buries the
+    # routing/audio events that matter in the appliance journal.
+    runner = web.AppRunner(api.application(), access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, config.runtime.api_host, config.runtime.api_port)
     await site.start()
