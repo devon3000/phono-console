@@ -22,7 +22,7 @@ while true; do
       -sample_rate "$input_rate" \
       -ac 2 \
       -i bluealsa \
-      -af "aresample=48000:async=1000:first_pts=0" \
+      -af "aresample=48000:async=1000" \
       -ar 48000 \
       -ac 2 \
       -f alsa \
