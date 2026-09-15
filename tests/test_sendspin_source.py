@@ -37,12 +37,14 @@ class FakeCapture:
         self.started = False
         self.stopped = False
         self.fed: list[bytes] = []
+        self.timestamps: list[int | None] = []
 
     async def start(self) -> None:
         self.started = True
 
     async def feed(self, pcm: bytes, capture_timestamp_us: int | None = None) -> None:
         self.fed.append(pcm)
+        self.timestamps.append(capture_timestamp_us)
 
     async def stop(self) -> None:
         self.stopped = True
@@ -57,6 +59,9 @@ class FakeClient:
     disconnects: int = 0
     captures: list[FakeCapture] = field(default_factory=list)
     signals: list = field(default_factory=list)
+
+    def now_us(self) -> int:
+        return 1_000_000
 
     def add_server_command_listener(self, callback):
         self.command_listeners.append(callback)
@@ -98,6 +103,11 @@ async def endless_pcm():
 
 async def finite_pcm():
     yield b"\x00\x00" * 2 * 960
+
+
+async def three_pcm_chunks():
+    for _ in range(3):
+        yield b"\x00\x00" * 2 * 960
 
 
 def make_publisher(client: FakeClient, state: StateStore | None = None):
@@ -304,5 +314,20 @@ def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
 
         stop.set()
         await asyncio.wait_for(run, timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_source_pcm_timestamps_follow_sample_clock_not_send_time() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        publisher, _, _ = make_publisher(client)
+        publisher._client = client
+        publisher._pcm_stream_factory = three_pcm_chunks
+        capture = FakeCapture()
+
+        await publisher._pump(capture)
+
+        assert capture.timestamps == [980_000, 1_000_000, 1_020_000]
 
     asyncio.run(scenario())

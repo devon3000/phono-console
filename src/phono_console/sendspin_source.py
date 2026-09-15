@@ -308,9 +308,31 @@ class SendspinSourcePublisher:
     async def _pump(self, capture: object) -> None:
         stream = self._pcm_stream_factory()
         error: str | None = None
+        capture_anchor_us: int | None = None
+        captured_frames = 0
+        frame_stride = self.audio.channels * 2
         try:
             async for chunk in stream:
-                await capture.feed(chunk)
+                frames = len(chunk) // frame_stride
+                if capture_anchor_us is None:
+                    client = self._client
+                    clock = getattr(client, "now_us", None)
+                    now_us = (
+                        int(clock())
+                        if clock is not None
+                        else int(asyncio.get_running_loop().time() * 1_000_000)
+                    )
+                    # readexactly returns after the final sample in this block
+                    # was captured; timestamp the first sample, not send time.
+                    capture_anchor_us = (
+                        now_us - frames * 1_000_000 // self.audio.sample_rate
+                    )
+                timestamp_us = (
+                    capture_anchor_us
+                    + captured_frames * 1_000_000 // self.audio.sample_rate
+                )
+                await capture.feed(chunk, capture_timestamp_us=timestamp_us)
+                captured_frames += frames
             error = "PCM capture ended unexpectedly"
         except asyncio.CancelledError:
             raise
