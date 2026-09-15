@@ -83,10 +83,12 @@ class Controller:
         if not healthy:
             self._distribution_healthy_since = None
             return False
-        if self._distribution_healthy_since is None:
-            self._distribution_healthy_since = now
-        hold = self.config.routing.distribution_recovery_hold_ms / 1000
-        return now - self._distribution_healthy_since >= hold
+        # Runtime availability already requires an explicit Sendspin
+        # source.start request. Waiting a second recovery interval here leaves
+        # the direct local route active while MA is returning that same source,
+        # causing the handoff to oscillate for the duration of the hold.
+        self._distribution_healthy_since = now
+        return True
 
     async def tick(self, now: float | None = None) -> Status:
         timestamp = time.monotonic() if now is None else now

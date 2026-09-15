@@ -114,7 +114,7 @@ def test_capture_loss_immediately_stops_an_active_local_route() -> None:
     asyncio.run(scenario())
 
 
-def test_distribution_recovery_is_held_then_prepared_automatically() -> None:
+def test_requested_distribution_is_prepared_immediately() -> None:
     async def scenario() -> None:
         level = SimulatedLevelMonitor()
         level.level = -20.0
@@ -136,8 +136,6 @@ def test_distribution_recovery_is_held_then_prepared_automatically() -> None:
         )
         await subject.tick(now=0)
         await subject.tick(now=0.25)
-        assert subject.route is Route.LOCAL_PHONO
-        await subject.tick(now=10.0)
         assert subject.route is Route.DISTRIBUTED_PHONO
         assert prepared == ["phono"]
 
