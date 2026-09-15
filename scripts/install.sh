@@ -97,7 +97,7 @@ choose_audio_device() {
 echo "Installing system packages..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  alsa-utils bluez bluez-alsa-utils curl libportaudio2 python3 python3-venv rfkill
+  alsa-utils bluez bluez-alsa-utils curl ffmpeg libportaudio2 python3 python3-venv rfkill
 
 modprobe snd-aloop
 cat >/etc/modules-load.d/phono-console.conf <<'EOF'

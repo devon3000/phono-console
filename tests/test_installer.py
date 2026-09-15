@@ -55,9 +55,10 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "/opt/phono-console/current/bin/bluetooth-ingest" in bluetooth_unit
     assert "StartLimitBurst" not in bluetooth_unit
     ingest = (ROOT / "scripts" / "bluetooth-ingest.sh").read_text()
-    assert "-A sincfastest" in ingest
-    assert "-S samplerate" in ingest
+    assert "aresample=48000:async=1000:first_pts=0" in ingest
+    assert "input_rate" in ingest
     assert "console_bt_playback48" in ingest
+    assert "curl ffmpeg libportaudio2" in installer
 
 
 def test_installer_migrates_the_legacy_null_capture() -> None:
