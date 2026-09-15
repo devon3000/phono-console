@@ -263,6 +263,11 @@ async def run_daemon(config: Config) -> None:
     )
     bluetooth_manager = BluetoothManager(config.bluetooth, events, state)
 
+    def reset_level_history() -> None:
+        monitor.session.reset()
+        if bluetooth_monitor is not None:
+            bluetooth_monitor.session.reset()
+
     async def local_only_action(enabled: bool) -> None:
         local_only_marker.parent.mkdir(parents=True, exist_ok=True)
         if enabled:
@@ -288,7 +293,7 @@ async def run_daemon(config: Config) -> None:
         api_token,
         whole_house_available=config.sendspin.source_enabled,
         whole_house_action=whole_house_action,
-        level_reset_action=monitor.session.reset,
+        level_reset_action=reset_level_history,
         pairing_open_action=(
             bluetooth_manager.open_pairing if config.bluetooth.enabled else None
         ),

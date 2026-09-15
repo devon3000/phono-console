@@ -104,7 +104,7 @@ function renderMeters(status, levels) {
   setChannel("in-r", levels?.right, Boolean(levels));
 
   const route = status?.route;
-  if (route === "local_phono" && levels) {
+  if ((route === "local_phono" || route === "local_bluetooth") && levels) {
     setChannel("out-l", levels.left, true);
     setChannel("out-r", levels.right, true);
     byId("output-badge").textContent = "INPUT MIRROR";

@@ -120,12 +120,14 @@ class Controller:
         phono_active = capture_ok and self.detector.update(level, timestamp)
         bluetooth_level = -120.0
         bluetooth_active = False
+        bluetooth_capture_ok = self.bluetooth_monitor is not None
         if self.bluetooth_monitor is not None:
             try:
                 bluetooth_level = await asyncio.wait_for(
                     self.bluetooth_monitor.level_dbfs(), timeout=2.0
                 )
             except Exception as exc:
+                bluetooth_capture_ok = False
                 self.bluetooth_detector.reset_inactive()
                 await self._set_component("bluetooth_audio", "degraded", str(exc))
             else:
@@ -261,17 +263,27 @@ class Controller:
         )
         if self.status_sink is not None:
             await self.status_sink.set_status(status)
-            latest = getattr(self.level_monitor, "latest", None)
-            session = getattr(self.level_monitor, "session", None)
+            selected_monitor = (
+                self.bluetooth_monitor
+                if route_source(route) is Source.BLUETOOTH
+                else self.level_monitor
+            )
+            selected_capture_ok = (
+                bluetooth_capture_ok
+                if selected_monitor is self.bluetooth_monitor
+                else capture_ok
+            )
+            latest = getattr(selected_monitor, "latest", None)
+            session = getattr(selected_monitor, "session", None)
             set_levels = getattr(self.status_sink, "set_input_levels", None)
             if (
-                capture_ok
+                selected_capture_ok
                 and latest is not None
                 and session is not None
                 and set_levels is not None
             ):
                 await set_levels(latest, session)
-            elif not capture_ok:
+            elif not selected_capture_ok:
                 clear_levels = getattr(
                     self.status_sink, "clear_input_levels", None
                 )

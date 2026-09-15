@@ -3,7 +3,9 @@ from pathlib import Path
 
 from phono_console.config import load_config
 from phono_console.controller import Controller
+from phono_console.levels import ChannelLevel, LevelSession, StereoLevel
 from phono_console.policy import Route
+from phono_console.state import StateStore
 from phono_console.simulation import (
     SimulatedAudioRouter,
     SimulatedEventSink,
@@ -218,5 +220,43 @@ def test_distributed_bluetooth_stays_latched_during_detector_gap() -> None:
         await subject.tick(now=13)
         assert subject.route is Route.DISTRIBUTED_BLUETOOTH
         assert released == []
+
+    asyncio.run(scenario())
+
+
+def test_selected_bluetooth_source_drives_dashboard_input_levels() -> None:
+    class MeterMonitor:
+        def __init__(self, dbfs: float) -> None:
+            self.latest = StereoLevel(
+                ChannelLevel(dbfs, dbfs - 1, False),
+                ChannelLevel(dbfs - 2, dbfs - 3, False),
+            )
+            self.session = LevelSession()
+            self.session.update(self.latest)
+
+        async def level_dbfs(self) -> float:
+            return self.latest.left.rms_dbfs
+
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        state = StateStore()
+        subject = Controller(
+            config(),
+            MeterMonitor(-60.0),
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            status_sink=state,
+            bluetooth_monitor=MeterMonitor(-10.0),
+        )
+
+        await subject.tick(now=0)
+        await subject.tick(now=1)
+
+        assert subject.route is Route.LOCAL_BLUETOOTH
+        assert state.input_levels["left"]["peak_dbfs"] == -10.0
+        assert state.input_levels["right"]["peak_dbfs"] == -12.0
 
     asyncio.run(scenario())
