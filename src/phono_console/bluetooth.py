@@ -20,7 +20,7 @@ class BluetoothManager:
         self._pairing_task: asyncio.Task[None] | None = None
         self._write_lock = asyncio.Lock()
 
-    async def _command(self, command: str) -> None:
+    async def _command(self, *command: str) -> None:
         """Run a BlueZ command and wait for its result.
 
         Writing several commands into an interactive bluetoothctl process can
@@ -32,14 +32,16 @@ class BluetoothManager:
                 "bluetoothctl",
                 "--timeout",
                 "10",
-                *command.split(),
+                *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
         if process.returncode != 0:
             detail = (stderr or stdout).decode(errors="replace").strip()
-            raise RuntimeError(detail or f"Bluetooth command failed: {command}")
+            raise RuntimeError(
+                detail or f"Bluetooth command failed: {' '.join(command)}"
+            )
 
     async def _publish(self, **values: object) -> None:
         current = dict(self.state.bluetooth)
@@ -47,8 +49,8 @@ class BluetoothManager:
         await self.state.set_bluetooth_state(current)
 
     async def open_pairing(self) -> None:
-        await self._command("pairable on")
-        await self._command("discoverable on")
+        await self._command("pairable", "on")
+        await self._command("discoverable", "on")
         if self._pairing_task is not None:
             self._pairing_task.cancel()
         self._pairing_task = asyncio.create_task(self._close_after_timeout())
@@ -64,8 +66,8 @@ class BluetoothManager:
         if task is not None and task is not asyncio.current_task():
             task.cancel()
         with suppress(Exception):
-            await self._command("discoverable off")
-            await self._command("pairable off")
+            await self._command("discoverable", "off")
+            await self._command("pairable", "off")
         trusted = await self._trust_paired_devices()
         await self._publish(
             pairing=False, pairing_seconds=0, trusted_devices=trusted
@@ -146,10 +148,10 @@ class BluetoothManager:
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
-                await self._command("power on")
-                await self._command(f"system-alias {self.config.alias}")
-                await self._command("discoverable off")
-                await self._command("pairable off")
+                await self._command("power", "on")
+                await self._command("system-alias", self.config.alias)
+                await self._command("discoverable", "off")
+                await self._command("pairable", "off")
                 await self._publish(enabled=True, agent=True, pairing=False)
                 await self.state.set_component("bluetooth_agent", "ok", "ready")
                 await self.events.emit("bluetooth_agent_started", {})
@@ -166,6 +168,7 @@ class BluetoothManager:
                     "bluetooth_agent", "degraded", "bluetoothctl exited"
                 )
             except Exception as exc:
+                await self._stop_agent()
                 await self._publish(enabled=True, agent=False, error=str(exc))
                 await self.state.set_component("bluetooth_agent", "degraded", str(exc))
                 await self.events.emit("bluetooth_agent_failed", {"error": str(exc)})
@@ -173,17 +176,21 @@ class BluetoothManager:
                 await asyncio.wait_for(stop.wait(), timeout=5)
         await self.close()
 
+    async def _stop_agent(self) -> None:
+        process = self._process
+        self._process = None
+        if process is None or process.returncode is not None:
+            return
+        process.terminate()
+        with suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), timeout=2)
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
     async def close(self) -> None:
         if self._pairing_task is not None:
             self._pairing_task.cancel()
             self._pairing_task = None
-        process = self._process
-        self._process = None
-        if process is not None and process.returncode is None:
-            process.terminate()
-            with suppress(TimeoutError):
-                await asyncio.wait_for(process.wait(), timeout=2)
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
+        await self._stop_agent()
         await self._publish(agent=False, pairing=False)

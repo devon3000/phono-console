@@ -272,7 +272,7 @@ threshold_dbfs = -60.0
 attack_ms = 200
 release_ms = 2000
 adapter = "hci0"
-alias = "Phono Console"
+alias = "PhonoConsole"
 pairing_window_seconds = 120
 
 [routing]
@@ -330,7 +330,7 @@ threshold_dbfs = -60.0
 attack_ms = 200
 release_ms = 2000
 adapter = "hci0"
-alias = "Phono Console"
+alias = "PhonoConsole"
 pairing_window_seconds = 120
 EOF
 fi
@@ -344,6 +344,7 @@ distribution_recovery_hold_ms = 10000
 EOF
 fi
 sed -i 's/^source_name = "Console Vinyl"/source_name = "Console Input"/' "$CONFIG_FILE"
+sed -i 's/^alias = "Phono Console"/alias = "PhonoConsole"/' "$CONFIG_FILE"
 
 # Migrate the earlier dmix playback alias to the measured lower-latency direct
 # plug path. Resolve the old slave before replacing/augmenting the file.

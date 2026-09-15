@@ -190,7 +190,7 @@ function render(data) {
   byId("pairing-open").disabled = pairing;
   byId("pairing-close").disabled = !pairing;
   byId("control-result").textContent = pairing
-    ? "Bluetooth pairing is open temporarily. Select Phono Console on your phone."
+    ? "Bluetooth pairing is open temporarily. Select PhonoConsole on your phone."
     : "Sources are selected automatically from their signal.";
 }
 

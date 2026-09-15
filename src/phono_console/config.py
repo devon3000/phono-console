@@ -31,7 +31,7 @@ class BluetoothConfig:
     attack_ms: int = 200
     release_ms: int = 2000
     adapter: str = "hci0"
-    alias: str = "Phono Console"
+    alias: str = "PhonoConsole"
     pairing_window_seconds: int = 120
 
 
@@ -141,7 +141,7 @@ def load_config(path: Path) -> Config:
             attack_ms=int(bluetooth.get("attack_ms", 200)),
             release_ms=int(bluetooth.get("release_ms", 2000)),
             adapter=str(bluetooth.get("adapter", "hci0")),
-            alias=str(bluetooth.get("alias", "Phono Console")),
+            alias=str(bluetooth.get("alias", "PhonoConsole")),
             pairing_window_seconds=int(
                 bluetooth.get("pairing_window_seconds", 120)
             ),
