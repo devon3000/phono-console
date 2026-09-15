@@ -167,4 +167,9 @@ version compatible with aiosendspin 9.x, with the `sendspin_source` plugin
 installed); there is deliberately no
 HTTP-radio or transcoding fallback.
 
+In Music Assistant, open the connected Sendspin source's settings and set
+**Automatically play line-in on player** to **Downstairs**. The console reports
+signal presence and waits for Music Assistant's source start command; Live
+Inputs cannot be started through the ordinary queue `play_media` API.
+
 See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
