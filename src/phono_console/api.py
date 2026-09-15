@@ -13,6 +13,7 @@ WholeHouseAction = Callable[[bool], Awaitable[None]]
 LevelResetAction = Callable[[], None]
 PairingAction = Callable[[], Awaitable[None]]
 BluetoothDeviceAction = Callable[[str, str], Awaitable[None]]
+LocalOnlyAction = Callable[[bool], Awaitable[None]]
 PUBLIC_PATHS = frozenset(("/", "/assets/dashboard.css", "/assets/dashboard.js"))
 
 
@@ -32,6 +33,7 @@ class ControlApi:
         pairing_open_action: PairingAction | None = None,
         pairing_close_action: PairingAction | None = None,
         bluetooth_device_action: BluetoothDeviceAction | None = None,
+        local_only_action: LocalOnlyAction | None = None,
     ) -> None:
         self.state = state
         self.token = token
@@ -41,6 +43,7 @@ class ControlApi:
         self.pairing_open_action = pairing_open_action
         self.pairing_close_action = pairing_close_action
         self.bluetooth_device_action = bluetooth_device_action
+        self.local_only_action = local_only_action
         self._whole_house_lock = asyncio.Lock()
 
     @web.middleware
@@ -129,6 +132,22 @@ class ControlApi:
             raise web.HTTPServiceUnavailable(text=str(exc)) from exc
         return web.json_response({"address": address, "action": action})
 
+    async def set_local_only(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        enabled = body.get("enabled")
+        if not isinstance(enabled, bool):
+            raise web.HTTPBadRequest(text="enabled must be a boolean")
+        if self.local_only_action is not None:
+            try:
+                await self.local_only_action(enabled)
+            except Exception as exc:
+                raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+        await self.state.set_local_playback_only(enabled)
+        await self.state.emit(
+            "local_playback_only_changed", {"enabled": enabled, "source": "api"}
+        )
+        return web.json_response({"enabled": enabled})
+
     async def set_whole_house(self, request: web.Request) -> web.Response:
         body = await request.json()
         requested = body.get("enabled")
@@ -201,6 +220,7 @@ class ControlApi:
                 web.post("/v1/levels/reset", self.reset_levels),
                 web.put("/v1/bluetooth/pairing", self.set_bluetooth_pairing),
                 web.post("/v1/bluetooth/device", self.bluetooth_device),
+                web.put("/v1/local-only", self.set_local_only),
                 web.put("/v1/whole-house", self.set_whole_house),
             ]
         )

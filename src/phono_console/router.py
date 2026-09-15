@@ -24,24 +24,30 @@ class ProcessAudioRouter:
         self.ma_loopback = ma_loopback
 
     async def apply(self, route: Route) -> None:
-        if route is Route.LOCAL_PHONO:
-            await self.local_loopback.start()
-        else:
+        phono_needed = route is Route.LOCAL_PHONO
+        bluetooth_needed = route is Route.LOCAL_BLUETOOTH
+        ma_needed = route in {
+            Route.MA_PLAYBACK,
+            Route.DISTRIBUTED_PHONO,
+            Route.DISTRIBUTED_BLUETOOTH,
+        }
+
+        # Every loopback targets the same exclusive hardware PCM. Stop the
+        # old owner before starting the new one; starting in attribute order
+        # made MA -> Bluetooth briefly overlap and fail with EBUSY.
+        if not phono_needed:
             await self.local_loopback.stop()
-        if self.bluetooth_loopback is not None:
-            if route is Route.LOCAL_BLUETOOTH:
-                await self.bluetooth_loopback.start()
-            else:
-                await self.bluetooth_loopback.stop()
-        if self.ma_loopback is not None:
-            if route in {
-                Route.MA_PLAYBACK,
-                Route.DISTRIBUTED_PHONO,
-                Route.DISTRIBUTED_BLUETOOTH,
-            }:
-                await self.ma_loopback.start()
-            else:
-                await self.ma_loopback.stop()
+        if self.bluetooth_loopback is not None and not bluetooth_needed:
+            await self.bluetooth_loopback.stop()
+        if self.ma_loopback is not None and not ma_needed:
+            await self.ma_loopback.stop()
+
+        if phono_needed:
+            await self.local_loopback.start()
+        elif bluetooth_needed and self.bluetooth_loopback is not None:
+            await self.bluetooth_loopback.start()
+        elif ma_needed and self.ma_loopback is not None:
+            await self.ma_loopback.start()
 
     async def reconcile(self, route: Route) -> None:
         """Repair drift without treating an unchanged route as a transition."""

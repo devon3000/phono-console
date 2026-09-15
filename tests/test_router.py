@@ -45,3 +45,30 @@ def test_router_exclusively_runs_the_selected_local_fallback() -> None:
         assert not phono.running and not bluetooth.running
 
     asyncio.run(scenario())
+
+
+def test_router_releases_output_before_starting_its_new_owner() -> None:
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        phono = ManagedProcess(ProcessSpec("phono", ("phono",)), FakeLauncher(), events)
+        bluetooth = ManagedProcess(
+            ProcessSpec("bluetooth", ("bluetooth",)), FakeLauncher(), events
+        )
+        ma = ManagedProcess(ProcessSpec("ma", ("ma",)), FakeLauncher(), events)
+        router = ProcessAudioRouter(phono, bluetooth, ma)
+
+        await router.apply(Route.MA_PLAYBACK)
+        events.events.clear()
+        await router.apply(Route.LOCAL_BLUETOOTH)
+
+        process_events = [
+            (name, details["process"])
+            for name, details in events.events
+            if name in {"audio_process_started", "audio_process_stopped"}
+        ]
+        assert process_events == [
+            ("audio_process_stopped", "ma"),
+            ("audio_process_started", "bluetooth"),
+        ]
+
+    asyncio.run(scenario())

@@ -188,9 +188,14 @@ function render(data) {
   renderConnections(data);
   renderEvents(data.events);
   const pairing = Boolean(data.bluetooth?.pairing);
+  const localOnly = Boolean(data.local_playback_only);
+  byId("local-only").classList.toggle("active", localOnly);
+  byId("local-only").textContent = localOnly ? "LOCAL ONLY: ON" : "LOCAL ONLY";
   byId("pairing-open").disabled = pairing;
   byId("pairing-close").disabled = !pairing;
-  byId("control-result").textContent = pairing
+  byId("control-result").textContent = localOnly
+    ? "Local-only mode is on. Phono and Bluetooth bypass Music Assistant."
+    : pairing
     ? "Bluetooth pairing is open temporarily. Select PhonoConsole on your phone."
     : "Sources are selected automatically from their signal.";
 }
@@ -198,6 +203,16 @@ function render(data) {
 async function setPairing(enabled) {
   try {
     await api("/v1/bluetooth/pairing", {method: "PUT", body: JSON.stringify({enabled})});
+    await poll();
+  } catch (error) {
+    byId("control-result").textContent = error.message;
+  }
+}
+
+async function setLocalOnly() {
+  const enabled = !byId("local-only").classList.contains("active");
+  try {
+    await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled})});
     await poll();
   } catch (error) {
     byId("control-result").textContent = error.message;
@@ -244,6 +259,7 @@ byId("reset-levels").addEventListener("click", async () => {
 });
 byId("pairing-open").addEventListener("click", () => setPairing(true));
 byId("pairing-close").addEventListener("click", () => setPairing(false));
+byId("local-only").addEventListener("click", setLocalOnly);
 
 poll();
 pollTimer = setInterval(poll, 250);

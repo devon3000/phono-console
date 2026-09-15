@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import socket
+from pathlib import Path
 from importlib.metadata import PackageNotFoundError, version
 
 from aiohttp import web
@@ -105,6 +106,8 @@ def ma_loopback_command(config: Config) -> tuple[str, ...]:
 
 async def run_daemon(config: Config) -> None:
     state = StateStore()
+    local_only_marker = Path(config.sendspin.state_dir) / "local-playback-only"
+    await state.set_local_playback_only(local_only_marker.exists())
     events = CompositeEventSink(LoggingEventSink(), state)
     launcher = SubprocessLauncher()
     phono_loopback = ManagedProcess(
@@ -157,6 +160,7 @@ async def run_daemon(config: Config) -> None:
                 ),
             },
         )
+        await publisher.set_distribution_enabled(not state.local_playback_only)
 
         async def whole_house_action(enabled: bool) -> None:
             assert publisher is not None
@@ -193,7 +197,8 @@ async def run_daemon(config: Config) -> None:
 
     def distribution_available() -> bool:
         return bool(
-            publisher is not None
+            not state.local_playback_only
+            and publisher is not None
             and state.sendspin_source.get("connected")
             and state.sendspin_source.get("stream_requested")
             and state.music_assistant.get("connected")
@@ -257,6 +262,27 @@ async def run_daemon(config: Config) -> None:
         }
     )
     bluetooth_manager = BluetoothManager(config.bluetooth, events, state)
+
+    async def local_only_action(enabled: bool) -> None:
+        local_only_marker.parent.mkdir(parents=True, exist_ok=True)
+        if enabled:
+            local_only_marker.touch()
+        else:
+            local_only_marker.unlink(missing_ok=True)
+        if publisher is not None:
+            await publisher.set_distribution_enabled(not enabled)
+        if enabled:
+            try:
+                await music_assistant.stop_players(
+                    (config.routing.distribution_target,)
+                )
+            except Exception as exc:
+                # Local-only is specifically an outage/troubleshooting mode;
+                # it must still engage when MA cannot confirm the remote stop.
+                await events.emit(
+                    "local_only_remote_stop_unconfirmed", {"error": str(exc)}
+                )
+
     api = ControlApi(
         state,
         api_token,
@@ -272,6 +298,7 @@ async def run_daemon(config: Config) -> None:
         bluetooth_device_action=(
             bluetooth_manager.device_action if config.bluetooth.enabled else None
         ),
+        local_only_action=local_only_action,
     )
     runner = web.AppRunner(api.application())
     await runner.setup()

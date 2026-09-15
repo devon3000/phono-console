@@ -131,9 +131,17 @@ class SendspinSourcePublisher:
         self._stream_retry_task: asyncio.Task[None] | None = None
         self._stream_error: str | None = None
         self._selected_source = Source.PHONO
+        self._distribution_enabled = True
         self._source_devices = source_devices or {
             Source.PHONO: audio.capture_device,
         }
+
+    async def set_distribution_enabled(self, enabled: bool) -> None:
+        self._distribution_enabled = enabled
+        if not enabled:
+            await self._send_signal(False)
+            await self._stop_streaming()
+        await self._publish_state()
 
     def _default_pcm_stream(self) -> AsyncIterator[bytes]:
         # 20 ms chunks keep feed timestamps fine-grained without hammering
@@ -399,7 +407,7 @@ class SendspinSourcePublisher:
                     selected = Source.BLUETOOTH
             if selected in self._source_devices:
                 await self.select_source(selected)
-            active = (
+            active = self._distribution_enabled and (
                 bool(status.phono_active or status.bluetooth_active)
                 if status is not None
                 else False

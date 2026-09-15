@@ -26,6 +26,7 @@ class StateStore:
         self._last_status_monotonic: float | None = None
         self.status: Status | None = None
         self.whole_house_requested = False
+        self.local_playback_only = False
         self.sendspin_source: dict[str, object] = {}
         self.music_assistant: dict[str, object] = {}
         self.bluetooth: dict[str, object] = {}
@@ -129,6 +130,11 @@ class StateStore:
             self.whole_house_requested = requested
             self.changed.notify_all()
 
+    async def set_local_playback_only(self, enabled: bool) -> None:
+        async with self.changed:
+            self.local_playback_only = enabled
+            self.changed.notify_all()
+
     async def emit(self, event: str, details: dict[str, object]) -> None:
         async with self.changed:
             self.events.append(
@@ -145,6 +151,7 @@ class StateStore:
         return {
             "status": status,
             "whole_house_requested": self.whole_house_requested,
+            "local_playback_only": self.local_playback_only,
             "sendspin_source": dict(self.sendspin_source),
             "music_assistant": dict(self.music_assistant),
             "bluetooth": dict(self.bluetooth),

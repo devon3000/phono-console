@@ -175,3 +175,25 @@ def test_api_controls_time_limited_bluetooth_pairing() -> None:
             await client.close()
 
     asyncio.run(scenario())
+
+
+def test_api_controls_local_only_mode() -> None:
+    async def scenario() -> None:
+        calls = []
+
+        async def action(enabled: bool) -> None:
+            calls.append(enabled)
+
+        state = StateStore()
+        api = ControlApi(state, None, local_only_action=action)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.put("/v1/local-only", json={"enabled": True})
+            assert response.status == 200
+            assert calls == [True]
+            assert state.snapshot()["local_playback_only"] is True
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())

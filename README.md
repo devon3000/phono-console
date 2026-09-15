@@ -154,6 +154,9 @@ A ready-to-copy Home Assistant package and setup instructions are in
 [home-assistant/](home-assistant/).
 
 The same service hosts a responsive dashboard at `http://PHONO_CONSOLE_IP:8765/`.
+Its **Local only** control persistently disables source publication and keeps
+phono/Bluetooth on the console speakers, including when Music Assistant is
+offline. Turn it off to restore automatic distribution to `Downstairs`.
 Enter the generated API token once per browser tab to see the active route,
 stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
 Sendspin connectivity, component health/errors, configured devices, version,

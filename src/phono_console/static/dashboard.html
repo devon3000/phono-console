@@ -106,7 +106,7 @@
           <div><dt>Music Assistant</dt><dd><span id="ma-dot" class="status-dot"></span><span id="ma-status">Unknown</span></dd></div>
           <div><dt>Sendspin player</dt><dd><span id="player-dot" class="status-dot"></span><span id="player-status">Unknown</span></dd></div>
           <div><dt>Sendspin source</dt><dd><span id="source-dot" class="status-dot"></span><span id="source-status">Unknown</span></dd></div>
-          <div><dt>Source pairing token</dt><dd id="source-pairing-token">—</dd></div>
+          <div><dt>Source pairing token</dt><dd id="source-pairing-token" class="pairing-token">—</dd></div>
           <div><dt>Source stream</dt><dd><span id="stream-dot" class="status-dot"></span><span id="stream-status">Idle</span></dd></div>
           <div><dt>Host</dt><dd id="host-name">—</dd></div>
           <div><dt>Address</dt><dd id="host-address">—</dd></div>
@@ -119,6 +119,7 @@
         <div class="panel-heading"><h2>Automatic routing</h2><span class="label">DISTRIBUTION</span></div>
         <p class="muted">Signal selects the source automatically. Phono and Bluetooth play on Downstairs through Music Assistant; direct local output is the outage fallback.</p>
         <div class="button-row">
+          <button id="local-only" class="secondary-button" type="button">LOCAL ONLY</button>
           <button id="pairing-open" class="primary-button" type="button">PAIR PHONE</button>
           <button id="pairing-close" class="secondary-button" type="button">CLOSE PAIRING</button>
         </div>
