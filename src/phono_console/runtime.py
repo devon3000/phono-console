@@ -223,6 +223,7 @@ async def run_daemon(config: Config) -> None:
             and state.sendspin_source.get("connected")
             and state.sendspin_source.get("stream_requested")
             and state.music_assistant.get("connected")
+            and music_assistant.console_playing
         )
 
     async def prepare_distribution(source: Source) -> bool:

@@ -35,8 +35,17 @@ class TimestampedBluetoothBackend:
             lambda: client.frames(AudioSource.BLUETOOTH),
             events,
         )
+        replay_ms = (
+            config.bluetooth.attack_ms + 3 * config.runtime.poll_interval_ms
+        )
+        replay_frames = min(
+            config.audio_engine.queue_frames,
+            max(1, replay_ms // config.audio_engine.frame_ms),
+        )
         playback = TimestampedLocalPlayback(
-            lambda: client.frames(AudioSource.BLUETOOTH),
+            lambda: client.frames(
+                AudioSource.BLUETOOTH, replay_frames=replay_frames
+            ),
             config.audio.playback_device,
             config.audio.sample_rate,
             config.audio.channels,

@@ -66,3 +66,23 @@ def test_fanout_delivers_one_frame_to_multiple_consumers() -> None:
         await second.aclose()
 
     asyncio.run(scenario())
+
+
+def test_new_secondary_consumer_can_replay_recent_frames() -> None:
+    async def scenario() -> None:
+        fanout = FrameFanout(queue_frames=4)
+        primary = fanout.frames(AudioSource.BLUETOOTH)
+        first_read = asyncio.create_task(anext(primary))
+        await asyncio.sleep(0)
+        fanout.publish(audio_frame(1))
+        assert (await first_read).sequence == 1
+        fanout.publish(audio_frame(2))
+        fanout.publish(audio_frame(3))
+
+        replay = fanout.frames(AudioSource.BLUETOOTH, replay_frames=2)
+        assert (await anext(replay)).sequence == 2
+        assert (await anext(replay)).sequence == 3
+        await replay.aclose()
+        await primary.aclose()
+
+    asyncio.run(scenario())

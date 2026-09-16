@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 
@@ -38,6 +39,7 @@ class FrameFanout:
         AudioSource, set[asyncio.Queue[TimestampedPcm]]
     ] = field(init=False)
     _primary_claimed: set[AudioSource] = field(init=False)
+    _history: dict[AudioSource, deque[TimestampedPcm]] = field(init=False)
 
     def __post_init__(self) -> None:
         if self.queue_frames < 2:
@@ -51,6 +53,9 @@ class FrameFanout:
             source: {self.queues[source]} for source in AudioSource
         }
         self._primary_claimed = set()
+        self._history = {
+            source: deque(maxlen=self.queue_frames) for source in AudioSource
+        }
 
     def publish(self, frame: TimestampedPcm) -> None:
         metric = self.metrics[frame.source]
@@ -66,6 +71,7 @@ class FrameFanout:
         metric.last_sequence = frame.sequence
         metric.last_epoch = frame.epoch
         metric.last_timestamp_us = frame.first_sample_time_us
+        self._history[frame.source].append(frame)
 
         for queue in tuple(self._subscribers[frame.source]):
             delivered = frame
@@ -77,7 +83,9 @@ class FrameFanout:
                 )
             queue.put_nowait(delivered)
 
-    async def frames(self, source: AudioSource) -> AsyncIterator[TimestampedPcm]:
+    async def frames(
+        self, source: AudioSource, *, replay_frames: int = 0
+    ) -> AsyncIterator[TimestampedPcm]:
         if source not in self._primary_claimed:
             queue = self.queues[source]
             self._primary_claimed.add(source)
@@ -86,6 +94,12 @@ class FrameFanout:
             queue = asyncio.Queue(maxsize=self.queue_frames)
             self._subscribers[source].add(queue)
             primary = False
+        if replay_frames > 0 and not primary:
+            history = tuple(self._history[source])[-replay_frames:]
+            for frame in history:
+                if queue.full():
+                    queue.get_nowait()
+                queue.put_nowait(frame)
         try:
             while True:
                 yield await queue.get()
@@ -136,5 +150,7 @@ class AudioEngineClient:
             except TimeoutError:
                 retry_seconds = min(retry_seconds * 2, 10.0)
 
-    def frames(self, source: AudioSource) -> AsyncIterator[TimestampedPcm]:
-        return self.fanout.frames(source)
+    def frames(
+        self, source: AudioSource, *, replay_frames: int = 0
+    ) -> AsyncIterator[TimestampedPcm]:
+        return self.fanout.frames(source, replay_frames=replay_frames)

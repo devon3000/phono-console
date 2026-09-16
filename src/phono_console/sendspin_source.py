@@ -28,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 IDENTITY_FILE = "identity.key"
 PAIRING_FILE = "pairing.json"
 TIME_SYNC_TIMEOUT_SECONDS = 10.0
-SIGNAL_RELEASE_SECONDS = 15.0
+SIGNAL_RELEASE_SECONDS = 1.0
 
 PcmStreamFactory = Callable[[], AsyncIterator[bytes | TimestampedPcm]]
 ClientFactory = Callable[[], Awaitable[object]]

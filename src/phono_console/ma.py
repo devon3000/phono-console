@@ -234,6 +234,11 @@ class MusicAssistantState:
     def request_whole_house(self, requested: bool) -> None:
         self._whole_house_requested = requested
 
+    @property
+    def console_playing(self) -> bool:
+        """Last confirmed playback state of the local Sendspin player."""
+        return self._last_console_playing
+
     async def close(self) -> None:
         if self._connection_task is not None:
             self._connection_task.cancel()
