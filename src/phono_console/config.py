@@ -69,6 +69,17 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class AudioEngineConfig:
+    backend: str = "legacy"
+    socket_path: str = "/run/phono-console/audio-engine.sock"
+    frame_ms: int = 20
+    output_prebuffer_ms: int = 80
+    route_fade_ms: int = 8
+    max_soft_correction_ppm: int = 250
+    queue_frames: int = 50
+
+
+@dataclass(frozen=True)
 class Config:
     audio: AudioConfig
     detection: DetectionConfig
@@ -77,6 +88,7 @@ class Config:
     bluetooth: BluetoothConfig = BluetoothConfig()
     routing: RoutingConfig = RoutingConfig()
     runtime: RuntimeConfig = RuntimeConfig()
+    audio_engine: AudioEngineConfig = AudioEngineConfig()
 
 
 def _required(table: dict, key: str, section: str):
@@ -97,6 +109,7 @@ def load_config(path: Path) -> Config:
     runtime = raw.get("runtime", {})
     bluetooth = raw.get("bluetooth", {})
     routing = raw.get("routing", {})
+    audio_engine = raw.get("audio_engine", {})
 
     config = Config(
         audio=AudioConfig(
@@ -168,6 +181,23 @@ def load_config(path: Path) -> Config:
                 runtime.get("api_token_env", "PHONO_CONSOLE_API_TOKEN")
             ),
         ),
+        audio_engine=AudioEngineConfig(
+            backend=str(audio_engine.get("backend", "legacy")),
+            socket_path=str(
+                audio_engine.get(
+                    "socket_path", "/run/phono-console/audio-engine.sock"
+                )
+            ),
+            frame_ms=int(audio_engine.get("frame_ms", 20)),
+            output_prebuffer_ms=int(
+                audio_engine.get("output_prebuffer_ms", 80)
+            ),
+            route_fade_ms=int(audio_engine.get("route_fade_ms", 8)),
+            max_soft_correction_ppm=int(
+                audio_engine.get("max_soft_correction_ppm", 250)
+            ),
+            queue_frames=int(audio_engine.get("queue_frames", 50)),
+        ),
     )
     _validate(config)
     return config
@@ -200,3 +230,17 @@ def _validate(config: Config) -> None:
         raise ValueError("music_assistant.whole_house_players entries must be non-empty")
     if config.sendspin.source_enabled and not config.sendspin.state_dir:
         raise ValueError("sendspin.state_dir is required when source_enabled is true")
+    if config.audio_engine.backend not in {"legacy", "timestamped"}:
+        raise ValueError("audio_engine.backend must be legacy or timestamped")
+    if not config.audio_engine.socket_path.startswith("/"):
+        raise ValueError("audio_engine.socket_path must be absolute")
+    if config.audio_engine.frame_ms not in {10, 20, 40}:
+        raise ValueError("audio_engine.frame_ms must be 10, 20, or 40")
+    if config.audio_engine.output_prebuffer_ms < config.audio_engine.frame_ms:
+        raise ValueError("audio_engine.output_prebuffer_ms is too small")
+    if not 0 <= config.audio_engine.route_fade_ms <= 100:
+        raise ValueError("audio_engine.route_fade_ms must be between 0 and 100")
+    if not 1 <= config.audio_engine.max_soft_correction_ppm <= 1000:
+        raise ValueError("audio_engine.max_soft_correction_ppm is invalid")
+    if not 2 <= config.audio_engine.queue_frames <= 500:
+        raise ValueError("audio_engine.queue_frames must be between 2 and 500")

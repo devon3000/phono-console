@@ -105,6 +105,11 @@ def ma_loopback_command(config: Config) -> tuple[str, ...]:
 
 
 async def run_daemon(config: Config) -> None:
+    if config.audio_engine.backend == "timestamped":
+        raise RuntimeError(
+            "timestamped audio backend is not activatable until the on-device "
+            "ALSA timestamp probe passes; set audio_engine.backend = 'legacy'"
+        )
     state = StateStore()
     local_only_marker = Path(config.sendspin.state_dir) / "local-playback-only"
     await state.set_local_playback_only(local_only_marker.exists())

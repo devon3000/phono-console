@@ -1,5 +1,17 @@
 # Timestamped audio engine implementation plan
 
+## Implementation status
+
+Work is isolated on `feature/timestamped-audio-engine`.
+
+- Phase 0: legacy default and rollback path preserved.
+- Phase 1: native ALSA timestamp probe implemented and installed with releases;
+  awaiting execution against the UFO202 and BlueALSA PCMs on the target Pi.
+- Phase 2: versioned C/Python frame protocol, bounded Python fan-out, and exact
+  timestamp forwarding into Sendspin implemented with automated tests.
+- Timestamped backend activation remains intentionally blocked until the Phase
+  1 device gate passes. Selecting it cannot silently run the legacy graph.
+
 ## Purpose
 
 Replace the Bluetooth `BlueALSA -> FFmpeg -> ALSA loopback -> arecord` path and

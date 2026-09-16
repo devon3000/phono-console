@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 from phono_console.config import AudioConfig, SendspinConfig
 from phono_console.controller import Status
+from phono_console.audio_engine_protocol import AudioSource, FrameFlags, TimestampedPcm
 from phono_console.policy import Route
 from phono_console.sendspin_source import SendspinSourcePublisher
 from phono_console.simulation import SimulatedEventSink
@@ -329,5 +330,35 @@ def test_source_pcm_timestamps_follow_sample_clock_not_send_time() -> None:
         await publisher._pump(capture)
 
         assert capture.timestamps == [980_000, 1_000_000, 1_020_000]
+
+    asyncio.run(scenario())
+
+
+def test_source_forwards_engine_sample_timestamp_unchanged() -> None:
+    async def timestamped_pcm():
+        yield TimestampedPcm(
+            AudioSource.BLUETOOTH,
+            FrameFlags.NONE,
+            1,
+            765_432_100,
+            48_000,
+            48_000,
+            2,
+            960,
+            0,
+            1,
+            b"\0\0" * 2 * 960,
+        )
+
+    async def scenario() -> None:
+        client = FakeClient()
+        publisher, _, _ = make_publisher(client)
+        publisher._client = client
+        publisher._pcm_stream_factory = timestamped_pcm
+        capture = FakeCapture()
+
+        await publisher._pump(capture)
+
+        assert capture.timestamps == [765_432_100]
 
     asyncio.run(scenario())

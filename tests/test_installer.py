@@ -59,7 +59,8 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "first_pts" not in ingest
     assert "input_rate" in ingest
     assert "console_bt_playback48" in ingest
-    assert "curl ffmpeg libportaudio2" in installer
+    for package in ("curl", "ffmpeg", "libportaudio2"):
+        assert package in installer
 
 
 def test_installer_migrates_the_legacy_null_capture() -> None:
@@ -75,3 +76,11 @@ def test_dashboard_assets_are_declared_as_package_data() -> None:
     assert '[tool.setuptools.package-data]' in project
     for asset in ("dashboard.html", "dashboard.css", "dashboard.js"):
         assert (ROOT / "src" / "phono_console" / "static" / asset).is_file()
+
+
+def test_installer_builds_native_timestamp_probe() -> None:
+    installer = (ROOT / "scripts" / "install.sh").read_text()
+    assert "libasound2-dev" in installer
+    assert "libsamplerate0-dev" in installer
+    assert 'make -C "$SOURCE_DIR/native"' in installer
+    assert '"$release_dir/phono-audio-engine"' in installer

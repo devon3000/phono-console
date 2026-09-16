@@ -10,6 +10,7 @@ echo "alsaloop:      $(command -v alsaloop || echo MISSING)"
 echo "sendspin:      $(command -v sendspin || echo MISSING)"
 echo "bluetoothctl:  $(command -v bluetoothctl || echo MISSING)"
 echo "bluealsa:      $(command -v bluealsa || command -v bluealsad || echo MISSING)"
+echo "audio engine:  $(readlink -f /opt/phono-console/current/phono-audio-engine 2>/dev/null || echo MISSING)"
 echo "config:        $CONFIG_FILE"
 
 if [[ ! -r "$CONFIG_FILE" ]]; then

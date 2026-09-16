@@ -17,6 +17,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from .alsa import CaptureUnavailable
+from .audio_engine_protocol import FrameFlags, TimestampedPcm
 from .config import AudioConfig, SendspinConfig
 from .interfaces import EventSink
 from .policy import Source
@@ -29,7 +30,7 @@ PAIRING_FILE = "pairing.json"
 TIME_SYNC_TIMEOUT_SECONDS = 10.0
 SIGNAL_RELEASE_SECONDS = 15.0
 
-PcmStreamFactory = Callable[[], AsyncIterator[bytes]]
+PcmStreamFactory = Callable[[], AsyncIterator[bytes | TimestampedPcm]]
 ClientFactory = Callable[[], Awaitable[object]]
 
 
@@ -313,7 +314,19 @@ class SendspinSourcePublisher:
         frame_stride = self.audio.channels * 2
         try:
             async for chunk in stream:
-                frames = len(chunk) // frame_stride
+                if isinstance(chunk, TimestampedPcm):
+                    if chunk.flags & FrameFlags.DISCONTINUITY and captured_frames:
+                        raise CaptureUnavailable(
+                            "timestamped source capture crossed a discontinuity"
+                        )
+                    pcm = chunk.pcm
+                    timestamp_us = chunk.first_sample_time_us
+                    frames = chunk.frames
+                    await capture.feed(pcm, capture_timestamp_us=timestamp_us)
+                    captured_frames += frames
+                    continue
+                pcm = chunk
+                frames = len(pcm) // frame_stride
                 if capture_anchor_us is None:
                     client = self._client
                     clock = getattr(client, "now_us", None)
@@ -331,7 +344,7 @@ class SendspinSourcePublisher:
                     capture_anchor_us
                     + captured_frames * 1_000_000 // self.audio.sample_rate
                 )
-                await capture.feed(chunk, capture_timestamp_us=timestamp_us)
+                await capture.feed(pcm, capture_timestamp_us=timestamp_us)
                 captured_frames += frames
             error = "PCM capture ended unexpectedly"
         except asyncio.CancelledError:

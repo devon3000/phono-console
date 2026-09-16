@@ -97,7 +97,8 @@ choose_audio_device() {
 echo "Installing system packages..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  alsa-utils bluez bluez-alsa-utils curl ffmpeg libportaudio2 python3 python3-venv rfkill
+  alsa-utils bluez bluez-alsa-utils build-essential curl ffmpeg libasound2-dev \
+  libportaudio2 libsamplerate0-dev pkg-config python3 python3-venv rfkill
 
 modprobe snd-aloop
 cat >/etc/modules-load.d/phono-console.conf <<'EOF'
@@ -131,6 +132,13 @@ install -d -m 0755 "$release_dir"
 python3 -m venv "$release_dir/venv"
 "$release_dir/venv/bin/pip" install --upgrade pip
 "$release_dir/venv/bin/pip" install "$SOURCE_DIR"
+
+echo "Building timestamp probe and audio-engine protocol tests..."
+make -C "$SOURCE_DIR/native" BUILD_DIR="$release_dir/native-build" test
+make -C "$SOURCE_DIR/native" BUILD_DIR="$release_dir/native-build" all
+install -m 0755 \
+  "$release_dir/native-build/phono-audio-engine" \
+  "$release_dir/phono-audio-engine"
 
 # The sendspin player pins aiosendspin 6.x while the routing daemon's source
 # client needs 9.x, so the player lives in its own venv.
