@@ -27,6 +27,13 @@ struct phono_clock_estimator {
     size_t next;
 };
 
+struct phono_clock_mapper {
+    uint64_t anchor_sample;
+    int64_t anchor_time_us;
+    long double us_per_sample;
+    bool initialized;
+};
+
 void phono_clock_reset(struct phono_clock_estimator *estimator);
 void phono_clock_observe(
     struct phono_clock_estimator *estimator,
@@ -42,5 +49,22 @@ int64_t phono_clock_timestamp(
     uint64_t sample_position
 );
 long double phono_clock_rate_hz(const struct phono_clock_fit *fit);
+void phono_clock_mapper_reset(struct phono_clock_mapper *mapper);
+void phono_clock_mapper_init(
+    struct phono_clock_mapper *mapper,
+    uint64_t sample_position,
+    int64_t timestamp_us,
+    unsigned int nominal_rate_hz
+);
+int64_t phono_clock_mapper_timestamp(
+    const struct phono_clock_mapper *mapper,
+    uint64_t sample_position
+);
+void phono_clock_mapper_update(
+    struct phono_clock_mapper *mapper,
+    const struct phono_clock_fit *fit,
+    uint64_t sample_position,
+    long double max_step_ppm
+);
 
 #endif

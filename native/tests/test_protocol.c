@@ -61,6 +61,21 @@ int main(void) {
         2000000.0L + 960000.0L * 1000000.0L / actual_rate
     );
     assert(llabs(predicted - expected) < 5000);
+
+    struct phono_clock_mapper mapper;
+    phono_clock_mapper_reset(&mapper);
+    phono_clock_mapper_init(&mapper, 0, 1000000, 48000);
+    const uint64_t update_sample = 48000;
+    const int64_t before = phono_clock_mapper_timestamp(&mapper, update_sample);
+    const struct phono_clock_fit faster_fit = {
+        .us_per_sample = 1000000.0L / 48010.0L,
+    };
+    phono_clock_mapper_update(&mapper, &faster_fit, update_sample, 10.0L);
+    const int64_t after = phono_clock_mapper_timestamp(&mapper, update_sample);
+    assert(before == after);
+    const long double mapped_rate = 1000000.0L / mapper.us_per_sample;
+    assert(mapped_rate > 48000.0L && mapped_rate < 48000.6L);
+    assert(phono_clock_mapper_timestamp(&mapper, update_sample + 960) > after);
     puts("protocol test passed");
     return 0;
 }

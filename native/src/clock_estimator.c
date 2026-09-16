@@ -82,3 +82,48 @@ int64_t phono_clock_timestamp(
 long double phono_clock_rate_hz(const struct phono_clock_fit *fit) {
     return 1000000.0L / fit->us_per_sample;
 }
+
+void phono_clock_mapper_reset(struct phono_clock_mapper *mapper) {
+    memset(mapper, 0, sizeof(*mapper));
+}
+
+void phono_clock_mapper_init(
+    struct phono_clock_mapper *mapper,
+    uint64_t sample_position,
+    int64_t timestamp_us,
+    unsigned int nominal_rate_hz
+) {
+    mapper->anchor_sample = sample_position;
+    mapper->anchor_time_us = timestamp_us;
+    mapper->us_per_sample = 1000000.0L / (long double)nominal_rate_hz;
+    mapper->initialized = true;
+}
+
+int64_t phono_clock_mapper_timestamp(
+    const struct phono_clock_mapper *mapper,
+    uint64_t sample_position
+) {
+    const long double sample_delta =
+        (long double)sample_position - (long double)mapper->anchor_sample;
+    return mapper->anchor_time_us +
+        (int64_t)llroundl(sample_delta * mapper->us_per_sample);
+}
+
+void phono_clock_mapper_update(
+    struct phono_clock_mapper *mapper,
+    const struct phono_clock_fit *fit,
+    uint64_t sample_position,
+    long double max_step_ppm
+) {
+    if (!mapper->initialized || fit->us_per_sample <= 0) return;
+    const int64_t continuous_time =
+        phono_clock_mapper_timestamp(mapper, sample_position);
+    const long double limit =
+        mapper->us_per_sample * max_step_ppm / 1000000.0L;
+    long double change = fit->us_per_sample - mapper->us_per_sample;
+    if (change > limit) change = limit;
+    if (change < -limit) change = -limit;
+    mapper->anchor_sample = sample_position;
+    mapper->anchor_time_us = continuous_time;
+    mapper->us_per_sample += change;
+}
