@@ -9,7 +9,8 @@
 static void usage(FILE *stream) {
     fprintf(stream,
             "usage: phono-audio-engine probe --device PCM [--seconds N] "
-            "[--rate HZ] [--channels N] [--period-frames N]\n");
+            "[--rate HZ] [--channels N] [--period-frames N] "
+            "[--buffer-frames N]\n");
 }
 
 static int parse_unsigned(const char *text, unsigned int *result) {
@@ -34,6 +35,7 @@ int main(int argc, char **argv) {
         .requested_rate = 48000,
         .requested_channels = 2,
         .period_frames = 960,
+        .buffer_frames = 3840,
     };
     for (int index = 2; index < argc; index++) {
         if (index + 1 >= argc) {
@@ -52,6 +54,8 @@ int main(int argc, char **argv) {
             if (parse_unsigned(value, &options.requested_channels) != 0) return 2;
         } else if (strcmp(name, "--period-frames") == 0) {
             if (parse_unsigned(value, &options.period_frames) != 0) return 2;
+        } else if (strcmp(name, "--buffer-frames") == 0) {
+            if (parse_unsigned(value, &options.buffer_frames) != 0) return 2;
         } else {
             usage(stderr);
             return 2;
@@ -59,7 +63,8 @@ int main(int argc, char **argv) {
     }
     if (options.device == NULL || options.seconds == 0 ||
         options.requested_rate == 0 || options.requested_channels == 0 ||
-        options.period_frames == 0) {
+        options.period_frames == 0 ||
+        options.buffer_frames < options.period_frames * 2) {
         usage(stderr);
         return 2;
     }

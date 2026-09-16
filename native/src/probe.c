@@ -46,9 +46,12 @@ int phono_run_probe(const struct phono_probe_options *options) {
     unsigned int rate = options->requested_rate;
     int direction = 0;
     snd_pcm_uframes_t period = options->period_frames;
+    snd_pcm_uframes_t requested_buffer = options->buffer_frames;
     if ((error = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, &direction)) < 0 ||
         (error = snd_pcm_hw_params_set_period_size_near(
              pcm, hw, &period, &direction)) < 0 ||
+        (error = snd_pcm_hw_params_set_buffer_size_near(
+             pcm, hw, &requested_buffer)) < 0 ||
         (error = snd_pcm_hw_params(pcm, hw)) < 0) {
         snd_pcm_close(pcm);
         return fail_alsa("apply capture hardware parameters", error);

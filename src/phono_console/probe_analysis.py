@@ -44,6 +44,11 @@ def analyze(path: Path) -> dict[str, object]:
         "frames": sum(int(record["frames"]) for record in captures),
         "xruns": max(int(record["xruns"]) for record in captures),
         "finished": finished is not None,
+        "captured_seconds": round(
+            sum(int(record["frames"]) for record in captures)
+            / int(started["rate_hz"]),
+            3,
+        ),
         "timestamps_monotonic": all(
             current > previous
             for previous, current in zip(timestamps, timestamps[1:], strict=False)

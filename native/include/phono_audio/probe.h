@@ -7,6 +7,7 @@ struct phono_probe_options {
     unsigned int requested_rate;
     unsigned int requested_channels;
     unsigned int period_frames;
+    unsigned int buffer_frames;
 };
 
 int phono_run_probe(const struct phono_probe_options *options);
