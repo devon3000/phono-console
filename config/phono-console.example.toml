@@ -27,6 +27,7 @@ distribution_target = "Downstairs"
 local_fallback_enabled = true
 distribution_recovery_hold_ms = 10000
 distribution_start_timeout_ms = 5000
+phono_mode_sticky_minutes = 60
 
 [audio_engine]
 # Use "timestamped" after installing the audio-engine service. Legacy remains

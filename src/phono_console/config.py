@@ -41,6 +41,7 @@ class RoutingConfig:
     local_fallback_enabled: bool = True
     distribution_recovery_hold_ms: int = 10_000
     distribution_start_timeout_ms: int = 5_000
+    phono_mode_sticky_minutes: int = 60
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,9 @@ def load_config(path: Path) -> Config:
             distribution_start_timeout_ms=int(
                 routing.get("distribution_start_timeout_ms", 5_000)
             ),
+            phono_mode_sticky_minutes=int(
+                routing.get("phono_mode_sticky_minutes", 60)
+            ),
         ),
         runtime=RuntimeConfig(
             poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
@@ -228,6 +232,8 @@ def _validate(config: Config) -> None:
         raise ValueError("routing.distribution_recovery_hold_ms cannot be negative")
     if not 500 <= config.routing.distribution_start_timeout_ms <= 30_000:
         raise ValueError("routing.distribution_start_timeout_ms is invalid")
+    if not 5 <= config.routing.phono_mode_sticky_minutes <= 24 * 60:
+        raise ValueError("routing.phono_mode_sticky_minutes must be 5..1440")
     if not 10 <= config.runtime.poll_interval_ms <= 5000:
         raise ValueError("runtime.poll_interval_ms must be between 10 and 5000")
     if not 1 <= config.runtime.api_port <= 65535:

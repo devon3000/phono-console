@@ -28,12 +28,18 @@ class DistributionPath(StrEnum):
     LOCAL_FALLBACK = "local_fallback"
 
 
+class PhonoOutputMode(StrEnum):
+    LOCAL = "local"
+    DOWNSTAIRS = "downstairs"
+
+
 @dataclass(frozen=True)
 class Inputs:
     phono_active: bool = False
     bluetooth_active: bool = False
     ma_playing: bool = False
     distribution_available: bool = False
+    phono_output_mode: PhonoOutputMode = PhonoOutputMode.LOCAL
 
 
 def choose_route(inputs: Inputs) -> Route:
@@ -42,6 +48,7 @@ def choose_route(inputs: Inputs) -> Route:
         return (
             Route.DISTRIBUTED_PHONO
             if inputs.distribution_available
+            and inputs.phono_output_mode is PhonoOutputMode.DOWNSTAIRS
             else Route.LOCAL_PHONO
         )
     if inputs.bluetooth_active:

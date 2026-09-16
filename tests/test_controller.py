@@ -1,10 +1,11 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 from phono_console.config import load_config
 from phono_console.controller import Controller
 from phono_console.levels import ChannelLevel, LevelSession, StereoLevel
-from phono_console.policy import Route
+from phono_console.policy import PhonoOutputMode, Route
 from phono_console.state import StateStore
 from phono_console.simulation import (
     SimulatedAudioRouter,
@@ -133,6 +134,7 @@ def test_requested_distribution_is_prepared_immediately() -> None:
             SimulatedEventSink(),
             distribution_available=lambda: True,
             prepare_distribution=prepare,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=0.25)
@@ -164,6 +166,7 @@ def test_distribution_is_released_when_source_signal_ends() -> None:
             distribution_available=lambda: distribution_requested,
             prepare_distribution=prepare,
             release_distribution=release,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=10)
@@ -324,5 +327,38 @@ def test_selected_bluetooth_source_drives_dashboard_input_levels() -> None:
         assert subject.route is Route.LOCAL_BLUETOOTH
         assert state.input_levels["left"]["peak_dbfs"] == -10.0
         assert state.input_levels["right"]["peak_dbfs"] == -12.0
+
+    asyncio.run(scenario())
+
+
+def test_downstairs_phono_mode_expires_after_inactivity() -> None:
+    async def scenario() -> None:
+        current_mode = PhonoOutputMode.DOWNSTAIRS
+        expirations = []
+
+        async def expire() -> None:
+            nonlocal current_mode
+            current_mode = PhonoOutputMode.LOCAL
+            expirations.append(True)
+
+        base = config()
+        subject = Controller(
+            replace(
+                base,
+                routing=replace(base.routing, phono_mode_sticky_minutes=5),
+            ),
+            SimulatedLevelMonitor(),
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            phono_output_mode=lambda: current_mode,
+            expire_phono_output_mode=expire,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=299)
+        assert current_mode is PhonoOutputMode.DOWNSTAIRS
+        await subject.tick(now=300)
+        assert current_mode is PhonoOutputMode.LOCAL
+        assert expirations == [True]
 
     asyncio.run(scenario())

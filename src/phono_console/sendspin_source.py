@@ -140,11 +140,23 @@ class SendspinSourcePublisher:
         self._source_devices = source_devices or {
             Source.PHONO: audio.capture_device,
         }
+        self._source_distribution_enabled = {
+            source: True for source in self._source_devices
+        }
         self._pcm_stream_factories = pcm_stream_factories or {}
 
     async def set_distribution_enabled(self, enabled: bool) -> None:
         self._distribution_enabled = enabled
         if not enabled:
+            await self._send_signal(False)
+            await self._stop_streaming()
+        await self._publish_state()
+
+    async def set_source_distribution_enabled(
+        self, source: Source, enabled: bool
+    ) -> None:
+        self._source_distribution_enabled[source] = enabled
+        if source is self._selected_source and not enabled:
             await self._send_signal(False)
             await self._stop_streaming()
         await self._publish_state()
@@ -477,7 +489,10 @@ class SendspinSourcePublisher:
                 if status is not None
                 else False
             )
-            if not self._distribution_enabled:
+            source_enabled = self._source_distribution_enabled.get(
+                selected or self._selected_source, True
+            )
+            if not self._distribution_enabled or not source_enabled:
                 active = False
                 absent_since = None
             elif detected:

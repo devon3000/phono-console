@@ -1,4 +1,4 @@
-from phono_console.policy import Inputs, Route, choose_route
+from phono_console.policy import Inputs, PhonoOutputMode, Route, choose_route
 
 
 def test_idle_when_no_source_is_active() -> None:
@@ -21,8 +21,18 @@ def test_bluetooth_takes_priority_over_ma_but_not_phono() -> None:
 
 def test_available_distribution_routes_local_sources_through_ma() -> None:
     assert choose_route(
-        Inputs(phono_active=True, distribution_available=True)
+        Inputs(
+            phono_active=True,
+            distribution_available=True,
+            phono_output_mode=PhonoOutputMode.DOWNSTAIRS,
+        )
     ) is Route.DISTRIBUTED_PHONO
     assert choose_route(
         Inputs(bluetooth_active=True, distribution_available=True)
     ) is Route.DISTRIBUTED_BLUETOOTH
+
+
+def test_phono_defaults_local_even_when_distribution_is_available() -> None:
+    assert choose_route(
+        Inputs(phono_active=True, distribution_available=True)
+    ) is Route.LOCAL_PHONO

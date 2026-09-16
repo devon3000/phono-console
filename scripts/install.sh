@@ -305,6 +305,7 @@ distribution_target = "$(toml_escape "$whole_house_group")"
 local_fallback_enabled = true
 distribution_recovery_hold_ms = 10000
 distribution_start_timeout_ms = 5000
+phono_mode_sticky_minutes = 60
 
 [music_assistant]
 base_url = "$(toml_escape "$ma_url")"
@@ -368,10 +369,15 @@ distribution_target = "$(toml_escape "$whole_house_group")"
 local_fallback_enabled = true
 distribution_recovery_hold_ms = 10000
 distribution_start_timeout_ms = 5000
+phono_mode_sticky_minutes = 60
 EOF
 fi
 if ! grep -q '^distribution_start_timeout_ms' "$CONFIG_FILE"; then
   sed -i '/^distribution_recovery_hold_ms/a distribution_start_timeout_ms = 5000' \
+    "$CONFIG_FILE"
+fi
+if ! grep -q '^phono_mode_sticky_minutes' "$CONFIG_FILE"; then
+  sed -i '/^distribution_start_timeout_ms/a phono_mode_sticky_minutes = 60' \
     "$CONFIG_FILE"
 fi
 if ! grep -q '^\[audio_engine\]' "$CONFIG_FILE"; then

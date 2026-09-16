@@ -14,6 +14,7 @@ from .policy import (
     Inputs,
     Route,
     Source,
+    PhonoOutputMode,
     choose_route,
     route_distribution,
     route_source,
@@ -51,6 +52,9 @@ class Controller:
         ] | None = None,
         prepare_distribution: Callable[[Source], Awaitable[bool]] | None = None,
         release_distribution: Callable[[], Awaitable[None]] | None = None,
+        phono_output_mode: Callable[[], PhonoOutputMode] | None = None,
+        expire_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
+        refresh_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.config = config
         self.level_monitor = level_monitor
@@ -63,6 +67,11 @@ class Controller:
         self.distribution_capable = distribution_capable
         self.prepare_distribution = prepare_distribution
         self.release_distribution = release_distribution
+        self.phono_output_mode = phono_output_mode or (lambda: PhonoOutputMode.LOCAL)
+        self.expire_phono_output_mode = expire_phono_output_mode
+        self.refresh_phono_output_mode = refresh_phono_output_mode
+        self._phono_mode_inactive_since: float | None = None
+        self._phono_mode_last_refresh: float | None = None
         self.detector = ActivityDetector(
             threshold_dbfs=config.detection.phono_threshold_dbfs,
             attack_seconds=config.detection.attack_ms / 1000,
@@ -132,6 +141,33 @@ class Controller:
             await self._set_component("music_assistant", "degraded", str(exc))
         whole_house = await self.music_assistant.whole_house_is_requested()
         phono_active = capture_ok and self.detector.update(level, timestamp)
+        output_mode = self.phono_output_mode()
+        if output_mode is PhonoOutputMode.DOWNSTAIRS:
+            if phono_active:
+                self._phono_mode_inactive_since = None
+                if (
+                    self.refresh_phono_output_mode is not None
+                    and (
+                        self._phono_mode_last_refresh is None
+                        or timestamp - self._phono_mode_last_refresh >= 60
+                    )
+                ):
+                    await self.refresh_phono_output_mode()
+                    self._phono_mode_last_refresh = timestamp
+            elif self._phono_mode_inactive_since is None:
+                self._phono_mode_inactive_since = timestamp
+            elif (
+                timestamp - self._phono_mode_inactive_since
+                >= self.config.routing.phono_mode_sticky_minutes * 60
+            ):
+                if self.expire_phono_output_mode is not None:
+                    await self.expire_phono_output_mode()
+                output_mode = PhonoOutputMode.LOCAL
+                self._phono_mode_inactive_since = None
+                self._phono_mode_last_refresh = None
+        else:
+            self._phono_mode_inactive_since = None
+            self._phono_mode_last_refresh = None
         bluetooth_level = -120.0
         bluetooth_active = False
         bluetooth_capture_ok = self.bluetooth_monitor is not None
@@ -188,7 +224,9 @@ class Controller:
             self._distribution_pending_source = None
             self._distribution_pending_since = None
 
-        inputs = Inputs(phono_active, bluetooth_active, ma_playing, available)
+        inputs = Inputs(
+            phono_active, bluetooth_active, ma_playing, available, output_mode
+        )
         desired_route = Route.IDLE if distribution_pending else choose_route(inputs)
         # Once Music Assistant has requested a source stream, its source.stop
         # command is the authority for ending that distributed session.  The
@@ -240,7 +278,13 @@ class Controller:
             if not prepared:
                 self._distribution_healthy_since = None
                 desired_route = choose_route(
-                    Inputs(phono_active, bluetooth_active, ma_playing, False)
+                    Inputs(
+                        phono_active,
+                        bluetooth_active,
+                        ma_playing,
+                        False,
+                        output_mode,
+                    )
                 )
         route = desired_route
 

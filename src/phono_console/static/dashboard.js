@@ -9,7 +9,7 @@ let requestActive = false;
 
 const routeLabels = {
   idle: ["Ready", "IDLE", "Waiting for an audio source"],
-  local_phono: ["Playing record", "LOCAL FALLBACK", "Turntable → console speakers (MA unavailable)"],
+  local_phono: ["Playing record", "CONSOLE", "Turntable → console speakers · minimum latency"],
   local_bluetooth: ["Bluetooth", "LOCAL FALLBACK", "Bluetooth → console speakers (MA unavailable)"],
   ma_playback: ["Music Assistant", "MA PLAYBACK", "Network audio → console speakers"],
   distributed_phono: ["Playing record", "DOWNSTAIRS", "Turntable → Music Assistant → Downstairs"],
@@ -189,6 +189,10 @@ function render(data) {
   renderEvents(data.events);
   const pairing = Boolean(data.bluetooth?.pairing);
   const localOnly = Boolean(data.local_playback_only);
+  const phonoMode = data.phono_output_mode || "local";
+  const stickyMinutes = Number(data.system?.phono_mode_sticky_minutes || 60);
+  byId("phono-local").className = phonoMode === "local" ? "primary-button" : "secondary-button";
+  byId("phono-downstairs").className = phonoMode === "downstairs" ? "primary-button" : "secondary-button";
   byId("local-only").classList.toggle("active", localOnly);
   byId("local-only").textContent = localOnly ? "LOCAL ONLY: ON" : "LOCAL ONLY";
   byId("pairing-open").disabled = pairing;
@@ -197,7 +201,9 @@ function render(data) {
     ? "Local-only mode is on. Phono and Bluetooth bypass Music Assistant."
     : pairing
     ? "Bluetooth pairing is open temporarily. Select PhonoConsole on your phone."
-    : "Sources are selected automatically from their signal.";
+    : phonoMode === "downstairs"
+    ? `Records play synchronized on Downstairs. After ${stickyMinutes} minutes without phono signal, Console becomes the default again.`
+    : "Records play directly on the console with minimum latency.";
 }
 
 async function setPairing(enabled) {
@@ -213,6 +219,15 @@ async function setLocalOnly() {
   const enabled = !byId("local-only").classList.contains("active");
   try {
     await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled})});
+    await poll();
+  } catch (error) {
+    byId("control-result").textContent = error.message;
+  }
+}
+
+async function setPhonoOutput(mode) {
+  try {
+    await api("/v1/phono-output", {method: "PUT", body: JSON.stringify({mode})});
     await poll();
   } catch (error) {
     byId("control-result").textContent = error.message;
@@ -260,6 +275,8 @@ byId("reset-levels").addEventListener("click", async () => {
 byId("pairing-open").addEventListener("click", () => setPairing(true));
 byId("pairing-close").addEventListener("click", () => setPairing(false));
 byId("local-only").addEventListener("click", setLocalOnly);
+byId("phono-local").addEventListener("click", () => setPhonoOutput("local"));
+byId("phono-downstairs").addEventListener("click", () => setPhonoOutput("downstairs"));
 
 poll();
 pollTimer = setInterval(poll, 250);
