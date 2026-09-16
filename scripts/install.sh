@@ -13,6 +13,17 @@ AUDIO_ENGINE_SERVICE_FILE="/etc/systemd/system/phono-console-audio-engine.servic
 ALSA_FILE="/etc/alsa/conf.d/99-phono-console.conf"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 config_backup=""
+requested_audio_backend=""
+
+case "${1:-}" in
+  --timestamped) requested_audio_backend="timestamped" ;;
+  --legacy) requested_audio_backend="legacy" ;;
+  "") ;;
+  *)
+    echo "Usage: sudo ./scripts/install.sh [--timestamped|--legacy]" >&2
+    exit 2
+    ;;
+esac
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run this installer with sudo: sudo ./scripts/install.sh" >&2
@@ -369,6 +380,11 @@ route_fade_ms = 8
 max_soft_correction_ppm = 250
 queue_frames = 50
 EOF
+fi
+if [[ -n "$requested_audio_backend" ]]; then
+  sed -i -E \
+    "s/^backend = \"(legacy|timestamped)\"$/backend = \"$requested_audio_backend\"/" \
+    "$CONFIG_FILE"
 fi
 sed -i 's/^source_name = "Console Vinyl"/source_name = "Console Input"/' "$CONFIG_FILE"
 sed -i 's/^alias = "Phono Console"/alias = "PhonoConsole"/' "$CONFIG_FILE"

@@ -61,6 +61,8 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "input_rate" in ingest
     assert "console_bt_playback48" in ingest
     assert "timestamped-audio-engine" in installer
+    assert "--timestamped) requested_audio_backend=\"timestamped\"" in installer
+    assert "--legacy) requested_audio_backend=\"legacy\"" in installer
     assert "systemctl disable --now phono-console-bluetooth.service" in installer
     engine_unit = (
         ROOT / "systemd" / "phono-console-audio-engine.service"
