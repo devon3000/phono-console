@@ -3,6 +3,7 @@
 #include "phono_audio/probe.h"
 
 #include <alsa/asoundlib.h>
+#include <alloca.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
