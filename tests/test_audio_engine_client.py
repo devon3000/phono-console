@@ -46,3 +46,20 @@ def test_fanout_streams_each_source_independently() -> None:
         await stream.aclose()
 
     asyncio.run(scenario())
+
+
+def test_fanout_delivers_one_frame_to_multiple_consumers() -> None:
+    async def scenario() -> None:
+        fanout = FrameFanout(queue_frames=2)
+        first = fanout.frames(AudioSource.BLUETOOTH)
+        second = fanout.frames(AudioSource.BLUETOOTH)
+        first_read = asyncio.create_task(anext(first))
+        second_read = asyncio.create_task(anext(second))
+        await asyncio.sleep(0)
+        fanout.publish(audio_frame(10))
+        assert (await first_read).sequence == 10
+        assert (await second_read).sequence == 10
+        await first.aclose()
+        await second.aclose()
+
+    asyncio.run(scenario())

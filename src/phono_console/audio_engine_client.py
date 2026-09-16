@@ -34,6 +34,10 @@ class FrameFanout:
         init=False
     )
     metrics: dict[AudioSource, SourceMetrics] = field(init=False)
+    _subscribers: dict[
+        AudioSource, set[asyncio.Queue[TimestampedPcm]]
+    ] = field(init=False)
+    _primary_claimed: set[AudioSource] = field(init=False)
 
     def __post_init__(self) -> None:
         if self.queue_frames < 2:
@@ -43,6 +47,10 @@ class FrameFanout:
             for source in AudioSource
         }
         self.metrics = {source: SourceMetrics() for source in AudioSource}
+        self._subscribers = {
+            source: {self.queues[source]} for source in AudioSource
+        }
+        self._primary_claimed = set()
 
     def publish(self, frame: TimestampedPcm) -> None:
         metric = self.metrics[frame.source]
@@ -59,16 +67,31 @@ class FrameFanout:
         metric.last_epoch = frame.epoch
         metric.last_timestamp_us = frame.first_sample_time_us
 
-        queue = self.queues[frame.source]
-        if queue.full():
-            queue.get_nowait()
-            metric.dropped += 1
-        queue.put_nowait(frame)
+        for queue in tuple(self._subscribers[frame.source]):
+            if queue.full():
+                queue.get_nowait()
+                metric.dropped += 1
+            queue.put_nowait(frame)
 
     async def frames(self, source: AudioSource) -> AsyncIterator[TimestampedPcm]:
-        queue = self.queues[source]
-        while True:
-            yield await queue.get()
+        if source not in self._primary_claimed:
+            queue = self.queues[source]
+            self._primary_claimed.add(source)
+            primary = True
+        else:
+            queue = asyncio.Queue(maxsize=self.queue_frames)
+            self._subscribers[source].add(queue)
+            primary = False
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            if primary:
+                self._primary_claimed.discard(source)
+                while not queue.empty():
+                    queue.get_nowait()
+            else:
+                self._subscribers[source].discard(queue)
 
 
 class AudioEngineClient:
