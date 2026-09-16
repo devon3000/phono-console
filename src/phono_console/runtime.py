@@ -12,6 +12,7 @@ from aiohttp import web
 
 from .alsa import ArecordLevelMonitor
 from .api import ControlApi, WholeHouseError
+from .audio_engine_backend import TimestampedBluetoothBackend
 from .bluetooth import BluetoothManager
 from .config import Config
 from .controller import Controller
@@ -25,6 +26,11 @@ from .sendspin_source import SendspinSourcePublisher
 from .state import StateStore
 
 LOGGER = logging.getLogger(__name__)
+
+# Capture and Sendspin publication are implemented and device-tested. Runtime
+# activation stays fail-closed until timestamped local playback can replace
+# the legacy BlueALSA loopback without device contention.
+TIMESTAMPED_LOCAL_OUTPUT_READY = False
 
 
 def validate_api_security(host: str, token: str | None) -> None:
@@ -105,16 +111,24 @@ def ma_loopback_command(config: Config) -> tuple[str, ...]:
 
 
 async def run_daemon(config: Config) -> None:
-    if config.audio_engine.backend == "timestamped":
+    if (
+        config.audio_engine.backend == "timestamped"
+        and not TIMESTAMPED_LOCAL_OUTPUT_READY
+    ):
         raise RuntimeError(
-            "timestamped audio backend is not activatable until the on-device "
-            "ALSA timestamp probe passes; set audio_engine.backend = 'legacy'"
+            "timestamped audio backend is not activatable until its local "
+            "output path is ready; set audio_engine.backend = 'legacy'"
         )
     state = StateStore()
     local_only_marker = Path(config.sendspin.state_dir) / "local-playback-only"
     await state.set_local_playback_only(local_only_marker.exists())
     events = CompositeEventSink(LoggingEventSink(), state)
     launcher = SubprocessLauncher()
+    timestamped_bluetooth = (
+        TimestampedBluetoothBackend.create(config, events)
+        if config.audio_engine.backend == "timestamped" and config.bluetooth.enabled
+        else None
+    )
     phono_loopback = ManagedProcess(
             ProcessSpec("local_loopback", local_loopback_command(config)),
             launcher,
@@ -164,6 +178,11 @@ async def run_daemon(config: Config) -> None:
                     else {}
                 ),
             },
+            pcm_stream_factories=(
+                timestamped_bluetooth.pcm_stream_factories
+                if timestamped_bluetooth is not None
+                else None
+            ),
         )
         await publisher.set_distribution_enabled(not state.local_playback_only)
 
@@ -189,15 +208,19 @@ async def run_daemon(config: Config) -> None:
                 )
 
     bluetooth_monitor = (
-        ArecordLevelMonitor(
-            config.bluetooth.capture_device,
-            events,
-            sample_rate=config.audio.sample_rate,
-            channels=config.audio.channels,
-            window_ms=config.audio.detection_window_ms,
+        timestamped_bluetooth.monitor
+        if timestamped_bluetooth
+        else (
+            ArecordLevelMonitor(
+                config.bluetooth.capture_device,
+                events,
+                sample_rate=config.audio.sample_rate,
+                channels=config.audio.channels,
+                window_ms=config.audio.detection_window_ms,
+            )
+            if config.bluetooth.enabled
+            else None
         )
-        if config.bluetooth.enabled
-        else None
     )
 
     def distribution_available() -> bool:
@@ -331,6 +354,8 @@ async def run_daemon(config: Config) -> None:
     )
     try:
         tasks = [controller.run(stop), bluetooth_manager.run(stop)]
+        if timestamped_bluetooth is not None:
+            tasks.append(timestamped_bluetooth.run(stop, state))
         if publisher is not None:
             tasks.append(publisher.run(stop))
         await asyncio.gather(*tasks)

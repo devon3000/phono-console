@@ -114,6 +114,7 @@ class SendspinSourcePublisher:
         signal_poll_seconds: float = 0.5,
         signal_release_seconds: float = SIGNAL_RELEASE_SECONDS,
         source_devices: dict[Source, str] | None = None,
+        pcm_stream_factories: dict[Source, PcmStreamFactory] | None = None,
     ) -> None:
         self.config = sendspin
         self.audio = audio
@@ -139,6 +140,7 @@ class SendspinSourcePublisher:
         self._source_devices = source_devices or {
             Source.PHONO: audio.capture_device,
         }
+        self._pcm_stream_factories = pcm_stream_factories or {}
 
     async def set_distribution_enabled(self, enabled: bool) -> None:
         self._distribution_enabled = enabled
@@ -147,7 +149,10 @@ class SendspinSourcePublisher:
             await self._stop_streaming()
         await self._publish_state()
 
-    def _default_pcm_stream(self) -> AsyncIterator[bytes]:
+    def _default_pcm_stream(self) -> AsyncIterator[bytes | TimestampedPcm]:
+        factory = self._pcm_stream_factories.get(self._selected_source)
+        if factory is not None:
+            return factory()
         # 20 ms chunks keep feed timestamps fine-grained without hammering
         # the websocket.
         chunk_frames = max(1, self.audio.sample_rate // 50)

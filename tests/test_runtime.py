@@ -37,7 +37,7 @@ def test_system_info_has_dashboard_network_shape() -> None:
     assert isinstance(info["addresses"], list)
 
 
-def test_timestamped_backend_cannot_activate_before_device_probe() -> None:
+def test_timestamped_backend_cannot_activate_before_local_output_is_ready() -> None:
     import asyncio
 
     config = load_config(
@@ -47,5 +47,5 @@ def test_timestamped_backend_cannot_activate_before_device_probe() -> None:
         config,
         audio_engine=replace(config.audio_engine, backend="timestamped"),
     )
-    with pytest.raises(RuntimeError, match="timestamp probe passes"):
+    with pytest.raises(RuntimeError, match="local output path is ready"):
         asyncio.run(run_daemon(config))
