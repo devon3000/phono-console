@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -46,7 +47,7 @@ static int open_capture(
     snd_pcm_hw_params_t *hw = NULL;
     snd_pcm_sw_params_t *sw = NULL;
     int error = snd_pcm_open(&pcm, options->device, SND_PCM_STREAM_CAPTURE, 0);
-    if (error < 0) return fail_alsa("snd_pcm_open", error);
+    if (error < 0) return -1;
     snd_pcm_hw_params_alloca(&hw);
     if ((error = snd_pcm_hw_params_any(pcm, hw)) < 0 ||
         (error = snd_pcm_hw_params_set_access(
@@ -91,12 +92,15 @@ static int open_capture(
 static int capture_client(
     int client,
     const struct phono_engine_options *options,
-    uint32_t *epoch
+    uint32_t *epoch,
+    bool *opened
 ) {
+    *opened = false;
     snd_pcm_t *pcm = NULL;
     unsigned int rate = 0;
     snd_pcm_uframes_t period = 0;
-    if (open_capture(options, &pcm, &rate, &period) != 0) return -1;
+    if (open_capture(options, &pcm, &rate, &period) != 0) return 0;
+    *opened = true;
     if (period > UINT16_MAX) {
         fprintf(stderr, "period exceeds protocol frame limit\n");
         snd_pcm_close(pcm);
@@ -122,6 +126,7 @@ static int capture_client(
     uint32_t next_flags = PHONO_AUDIO_FLAG_DISCONTINUITY |
         PHONO_AUDIO_FLAG_CLOCK_RESET;
     unsigned int observations_since_fit = 0;
+    bool client_gone = false;
 
     fprintf(stderr, "capture started: device=%s rate=%u period=%lu epoch=%u\n",
             options->device, rate, (unsigned long)period, *epoch);
@@ -198,6 +203,7 @@ static int capture_client(
             next_flags |= PHONO_AUDIO_FLAG_DISCONTINUITY;
         } else if (sent < 0 || (size_t)sent !=
                    PHONO_AUDIO_FRAME_HEADER_SIZE + actual_pcm_bytes) {
+            client_gone = true;
             break;
         } else {
             next_flags = 0;
@@ -209,7 +215,22 @@ static int capture_client(
             options->device, sequence);
     free(packet);
     snd_pcm_close(pcm);
-    return 0;
+    return client_gone ? 1 : 0;
+}
+
+static bool wait_for_capture_or_disconnect(int client) {
+    struct pollfd descriptor = {
+        .fd = client,
+        .events = POLLHUP | POLLERR,
+        .revents = 0,
+    };
+    int result;
+    do {
+        result = poll(&descriptor, 1, 1000);
+    } while (result < 0 && errno == EINTR && running);
+    if (!running) return false;
+    if (result < 0) return false;
+    return (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL)) == 0;
 }
 
 int phono_run_engine(const struct phono_engine_options *options) {
@@ -250,7 +271,22 @@ int phono_run_engine(const struct phono_engine_options *options) {
             perror("accept");
             break;
         }
-        (void)capture_client(client, options, &epoch);
+        bool unavailable_logged = false;
+        while (running) {
+            bool opened = false;
+            const int client_gone = capture_client(
+                client, options, &epoch, &opened);
+            if (client_gone) break;
+            if (opened) {
+                epoch++;
+                unavailable_logged = false;
+            } else if (!unavailable_logged) {
+                fprintf(stderr,
+                        "capture unavailable: waiting for Bluetooth audio\n");
+                unavailable_logged = true;
+            }
+            if (!wait_for_capture_or_disconnect(client)) break;
+        }
         close(client);
         epoch++;
     }

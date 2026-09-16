@@ -529,7 +529,7 @@ systemctl restart phono-console-player.service phono-console.service
 healthy=false
 healthy_count=0
 for _attempt in $(seq 1 30); do
-  if curl --fail --silent --show-error \
+  if curl --fail --silent \
     -H "Authorization: Bearer $api_token" \
     "http://127.0.0.1:8765/health/live" >/dev/null; then
     healthy_count=$((healthy_count + 1))
