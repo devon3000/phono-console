@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from contextlib import suppress
 
@@ -9,39 +10,68 @@ from .interfaces import EventSink
 from .state import StateStore
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class BluetoothManager:
-    """Supervise a headless BlueZ agent and time-limited pairing window."""
+    """Supervise one headless BlueZ agent and a time-limited pairing window."""
 
     def __init__(self, config: BluetoothConfig, events: EventSink, state: StateStore):
         self.config = config
         self.events = events
         self.state = state
         self._process: asyncio.subprocess.Process | None = None
+        self._reader_task: asyncio.Task[None] | None = None
         self._pairing_task: asyncio.Task[None] | None = None
+        self._pairing_active = False
+        self._agent_ready = asyncio.Event()
         self._write_lock = asyncio.Lock()
 
-    async def _command(self, *command: str) -> None:
-        """Run a BlueZ command and wait for its result.
-
-        Writing several commands into an interactive bluetoothctl process can
-        race adapter discovery at boot. One-shot invocations provide an exit
-        status and make configuration deterministic.
-        """
+    async def _send_command(self, *command: str) -> None:
+        """Send a command through the process that owns the BlueZ agent."""
+        process = self._process
+        if process is None or process.returncode is not None or process.stdin is None:
+            raise RuntimeError("Bluetooth agent is not running")
         async with self._write_lock:
-            process = await asyncio.create_subprocess_exec(
-                "bluetoothctl",
-                "--timeout",
-                "10",
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
-        if process.returncode != 0:
-            detail = (stderr or stdout).decode(errors="replace").strip()
-            raise RuntimeError(
-                detail or f"Bluetooth command failed: {' '.join(command)}"
-            )
+            process.stdin.write((" ".join(command) + "\n").encode())
+            await process.stdin.drain()
+
+    async def _read_agent_output(self) -> None:
+        process = self._process
+        if process is None or process.stdout is None:
+            return
+        pending = ""
+        while True:
+            chunk = await process.stdout.read(512)
+            if not chunk:
+                return
+            text = chunk.decode(errors="replace")
+            pending = (pending + text)[-2048:]
+            for line in text.splitlines():
+                if line.strip():
+                    _LOGGER.info("bluetoothctl: %s", line.strip())
+            if "Agent registered" in pending:
+                self._agent_ready.set()
+            prompt = re.search(r"([^\r\n]*(?:yes/no|yes/no/always)[^\r\n]*)", pending, re.I)
+            if prompt is not None:
+                accepted = self._pairing_active
+                await self._answer_agent_prompt(accepted, prompt.group(1).strip())
+                pending = ""
+
+    async def _answer_agent_prompt(self, accepted: bool, prompt: str) -> None:
+        process = self._process
+        if process is None or process.returncode is not None or process.stdin is None:
+            return
+        async with self._write_lock:
+            process.stdin.write(b"yes\n" if accepted else b"no\n")
+            await process.stdin.drain()
+        event = (
+            "bluetooth_pairing_prompt_accepted"
+            if accepted
+            else "bluetooth_pairing_prompt_rejected"
+        )
+        await self.events.emit(event, {"prompt": prompt})
+        _LOGGER.info("%s: %s", event, prompt)
 
     async def _publish(self, **values: object) -> None:
         current = dict(self.state.bluetooth)
@@ -49,25 +79,30 @@ class BluetoothManager:
         await self.state.set_bluetooth_state(current)
 
     async def open_pairing(self) -> None:
-        await self._command("pairable", "on")
-        await self._command("discoverable", "on")
+        self._pairing_active = True
+        await self._send_command("pairable", "on")
+        await self._send_command("discoverable", "on")
         if self._pairing_task is not None:
             self._pairing_task.cancel()
         self._pairing_task = asyncio.create_task(self._close_after_timeout())
-        await self._publish(pairing=True, pairing_seconds=self.config.pairing_window_seconds)
+        await self._publish(
+            pairing=True,
+            pairing_seconds=self.config.pairing_window_seconds,
+        )
         await self.events.emit(
             "bluetooth_pairing_opened",
             {"seconds": self.config.pairing_window_seconds},
         )
 
     async def close_pairing(self) -> None:
+        self._pairing_active = False
         task = self._pairing_task
         self._pairing_task = None
         if task is not None and task is not asyncio.current_task():
             task.cancel()
         with suppress(Exception):
-            await self._command("discoverable", "off")
-            await self._command("pairable", "off")
+            await self._send_command("discoverable", "off")
+            await self._send_command("pairable", "off")
         trusted = await self._trust_paired_devices()
         await self._publish(
             pairing=False, pairing_seconds=0, trusted_devices=trusted
@@ -140,18 +175,23 @@ class BluetoothManager:
             return
         while not stop.is_set():
             try:
+                self._agent_ready.clear()
                 self._process = await asyncio.create_subprocess_exec(
                     "bluetoothctl",
                     "--agent",
                     "NoInputNoOutput",
                     stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
                 )
-                await self._command("power", "on")
-                await self._command("system-alias", self.config.alias)
-                await self._command("discoverable", "off")
-                await self._command("pairable", "off")
+                self._reader_task = asyncio.create_task(self._read_agent_output())
+                async with asyncio.timeout(5):
+                    await self._agent_ready.wait()
+                await self._send_command("default-agent")
+                await self._send_command("power", "on")
+                await self._send_command("system-alias", self.config.alias)
+                await self._send_command("discoverable", "off")
+                await self._send_command("pairable", "off")
                 await self._publish(enabled=True, agent=True, pairing=False)
                 await self.state.set_component("bluetooth_agent", "ok", "ready")
                 await self.events.emit("bluetooth_agent_started", {})
@@ -179,14 +219,20 @@ class BluetoothManager:
     async def _stop_agent(self) -> None:
         process = self._process
         self._process = None
-        if process is None or process.returncode is not None:
-            return
-        process.terminate()
-        with suppress(TimeoutError):
-            await asyncio.wait_for(process.wait(), timeout=2)
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
+        self._pairing_active = False
+        if process is not None and process.returncode is None:
+            process.terminate()
+            with suppress(TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=2)
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+        reader = self._reader_task
+        self._reader_task = None
+        if reader is not None:
+            reader.cancel()
+            with suppress(asyncio.CancelledError):
+                await reader
 
     async def close(self) -> None:
         if self._pairing_task is not None:
