@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 
 from .audio_engine_protocol import TimestampedPcm
 from .interfaces import EventSink
@@ -15,11 +17,12 @@ class TimestampedLevelMonitor:
     def __init__(
         self,
         device: str,
-        frames: AsyncIterator[TimestampedPcm],
+        frames: Callable[[], AsyncIterator[TimestampedPcm]],
         events: EventSink,
     ) -> None:
         self.device = device
-        self._frames = frames
+        self._frame_factory = frames
+        self._frames: AsyncIterator[TimestampedPcm] | None = None
         self.events = events
         self.latest: StereoLevel | None = None
         self.session = LevelSession()
@@ -27,9 +30,19 @@ class TimestampedLevelMonitor:
         self._last_error: str | None = None
 
     async def level_dbfs(self) -> float:
+        if self._frames is None:
+            self._frames = self._frame_factory()
         try:
             frame = await anext(self._frames)
+        except asyncio.CancelledError:
+            stream = self._frames
+            self._frames = None
+            if stream is not None:
+                with suppress(Exception):
+                    await stream.aclose()
+            raise
         except (StopAsyncIteration, OSError, RuntimeError) as exc:
+            self._frames = None
             self._last_error = str(exc) or "audio engine stream ended"
             raise RuntimeError(self._last_error) from exc
         first = self._last_sample_at is None
@@ -71,6 +84,9 @@ class TimestampedLevelMonitor:
         }
 
     async def close(self) -> None:
-        await self._frames.aclose()
+        stream = self._frames
+        self._frames = None
+        if stream is not None:
+            await stream.aclose()
         if self._last_sample_at is not None:
             await self.events.emit("capture_stopped", {"device": self.device})

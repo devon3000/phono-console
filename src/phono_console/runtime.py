@@ -27,11 +27,6 @@ from .state import StateStore
 
 LOGGER = logging.getLogger(__name__)
 
-# Capture and Sendspin publication are implemented and device-tested. Runtime
-# activation stays fail-closed until timestamped local playback can replace
-# the legacy BlueALSA loopback without device contention.
-TIMESTAMPED_LOCAL_OUTPUT_READY = False
-
 
 def validate_api_security(host: str, token: str | None) -> None:
     """Refuse an unauthenticated API exposed beyond the local machine."""
@@ -111,14 +106,6 @@ def ma_loopback_command(config: Config) -> tuple[str, ...]:
 
 
 async def run_daemon(config: Config) -> None:
-    if (
-        config.audio_engine.backend == "timestamped"
-        and not TIMESTAMPED_LOCAL_OUTPUT_READY
-    ):
-        raise RuntimeError(
-            "timestamped audio backend is not activatable until its local "
-            "output path is ready; set audio_engine.backend = 'legacy'"
-        )
     state = StateStore()
     local_only_marker = Path(config.sendspin.state_dir) / "local-playback-only"
     await state.set_local_playback_only(local_only_marker.exists())
@@ -130,18 +117,24 @@ async def run_daemon(config: Config) -> None:
         else None
     )
     phono_loopback = ManagedProcess(
-            ProcessSpec("local_loopback", local_loopback_command(config)),
-            launcher,
-            events,
-        )
+        ProcessSpec("local_loopback", local_loopback_command(config)),
+        launcher,
+        events,
+    )
     bluetooth_loopback = (
-        ManagedProcess(
-            ProcessSpec("bluetooth_loopback", bluetooth_loopback_command(config)),
-            launcher,
-            events,
+        timestamped_bluetooth.playback
+        if timestamped_bluetooth
+        else (
+            ManagedProcess(
+                ProcessSpec(
+                    "bluetooth_loopback", bluetooth_loopback_command(config)
+                ),
+                launcher,
+                events,
+            )
+            if config.bluetooth.enabled
+            else None
         )
-        if config.bluetooth.enabled
-        else None
     )
     ma_loopback = ManagedProcess(
         ProcessSpec("ma_loopback", ma_loopback_command(config)), launcher, events

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import socket
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .audio_engine_protocol import (
     HEADER_SIZE,
@@ -68,10 +68,14 @@ class FrameFanout:
         metric.last_timestamp_us = frame.first_sample_time_us
 
         for queue in tuple(self._subscribers[frame.source]):
+            delivered = frame
             if queue.full():
                 queue.get_nowait()
                 metric.dropped += 1
-            queue.put_nowait(frame)
+                delivered = replace(
+                    frame, flags=frame.flags | FrameFlags.DISCONTINUITY
+                )
+            queue.put_nowait(delivered)
 
     async def frames(self, source: AudioSource) -> AsyncIterator[TimestampedPcm]:
         if source not in self._primary_claimed:

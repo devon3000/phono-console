@@ -49,6 +49,7 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert 'PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"' in installer
     assert "type dmix" not in installer
     assert (ROOT / "systemd" / "phono-console-bluetooth.service").is_file()
+    assert (ROOT / "systemd" / "phono-console-audio-engine.service").is_file()
     bluetooth_unit = (
         ROOT / "systemd" / "phono-console-bluetooth.service"
     ).read_text()
@@ -59,6 +60,13 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "first_pts" not in ingest
     assert "input_rate" in ingest
     assert "console_bt_playback48" in ingest
+    assert "timestamped-audio-engine" in installer
+    assert "systemctl disable --now phono-console-bluetooth.service" in installer
+    engine_unit = (
+        ROOT / "systemd" / "phono-console-audio-engine.service"
+    ).read_text()
+    assert "phono-audio-engine serve" in engine_unit
+    assert "RuntimeDirectory=phono-console" in engine_unit
     for package in ("curl", "ffmpeg", "libportaudio2"):
         assert package in installer
 

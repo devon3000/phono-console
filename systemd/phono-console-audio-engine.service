@@ -1,0 +1,27 @@
+[Unit]
+Description=Phono Console timestamped Bluetooth audio engine
+Wants=bluetooth.service bluealsa.service sound.target
+After=bluetooth.service bluealsa.service sound.target
+Before=phono-console.service
+ConditionPathExists=/etc/phono-console/timestamped-audio-engine
+
+[Service]
+Type=simple
+User=phono-console
+Group=phono-console
+SupplementaryGroups=audio bluetooth
+RuntimeDirectory=phono-console
+RuntimeDirectoryMode=0750
+ExecStart=/opt/phono-console/current/phono-audio-engine serve --device bluealsa --socket /run/phono-console/audio-engine.sock --source bluetooth --rate 48000 --channels 2 --period-frames 960 --buffer-frames 3840
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

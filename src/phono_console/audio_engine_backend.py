@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from .audio_engine_client import AudioEngineClient
 from .audio_engine_monitor import TimestampedLevelMonitor
+from .audio_engine_playback import TimestampedLocalPlayback
 from .audio_engine_protocol import AudioSource
 from .config import Config
 from .interfaces import EventSink
@@ -19,6 +20,7 @@ class TimestampedBluetoothBackend:
 
     client: AudioEngineClient
     monitor: TimestampedLevelMonitor
+    playback: TimestampedLocalPlayback
 
     @classmethod
     def create(
@@ -30,10 +32,17 @@ class TimestampedBluetoothBackend:
         )
         monitor = TimestampedLevelMonitor(
             "audio-engine:bluetooth",
-            client.frames(AudioSource.BLUETOOTH),
+            lambda: client.frames(AudioSource.BLUETOOTH),
             events,
         )
-        return cls(client, monitor)
+        playback = TimestampedLocalPlayback(
+            lambda: client.frames(AudioSource.BLUETOOTH),
+            config.audio.playback_device,
+            config.audio.sample_rate,
+            config.audio.channels,
+            events,
+        )
+        return cls(client, monitor, playback)
 
     @property
     def pcm_stream_factories(self) -> dict[Source, PcmStreamFactory]:

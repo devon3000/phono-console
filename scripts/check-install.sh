@@ -26,9 +26,24 @@ systemctl is-enabled phono-console.service
 systemctl is-active phono-console.service
 systemctl is-enabled phono-console-player.service
 systemctl is-active phono-console-player.service
-systemctl is-enabled phono-console-bluetooth.service
-systemctl is-active phono-console-bluetooth.service || \
-  echo "Bluetooth ingest is waiting for an A2DP source."
+audio_engine_backend="$(python3 - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    print(tomllib.load(handle).get("audio_engine", {}).get("backend", "legacy"))
+PY
+)"
+if [[ "$audio_engine_backend" == "timestamped" ]]; then
+  systemctl is-enabled phono-console-audio-engine.service
+  systemctl is-active phono-console-audio-engine.service
+  if systemctl is-enabled phono-console-bluetooth.service >/dev/null 2>&1; then
+    echo "Legacy Bluetooth ingest must be disabled in timestamped mode." >&2
+    exit 1
+  fi
+else
+  systemctl is-enabled phono-console-bluetooth.service
+  systemctl is-active phono-console-bluetooth.service || \
+    echo "Bluetooth ingest is waiting for an A2DP source."
+fi
 
 ENV_FILE="/etc/phono-console/environment"
 api_token="$(awk -F= '$1 == "PHONO_CONSOLE_API_TOKEN" {

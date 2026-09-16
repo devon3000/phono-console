@@ -28,8 +28,8 @@ local_fallback_enabled = true
 distribution_recovery_hold_ms = 10000
 
 [audio_engine]
-# Timestamped mode is enabled only after the on-device probe validates the
-# ALSA/BlueALSA sample timestamps. Legacy remains the safe migration default.
+# Use "timestamped" after installing the audio-engine service. Legacy remains
+# the safe upgrade default until the new path is explicitly selected.
 backend = "legacy"
 socket_path = "/run/phono-console/audio-engine.sock"
 frame_ms = 20

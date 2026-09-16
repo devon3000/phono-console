@@ -354,14 +354,26 @@ Exit: phono priority, local fallback, MA return, and device-recovery tests pass.
 
 ### Phase 4 — Bluetooth vertical slice
 
-- Add BlueALSA capture, transport lifecycle, nominal resampling, timestamped
-  Sendspin frames, and local adaptive playback.
-- Remove FFmpeg and the Bluetooth ALSA loopback from the enabled graph.
+- Add exclusive BlueALSA capture, transport lifecycle, timestamped Sendspin
+  frames, and local adaptive playback.
+- Remove the legacy FFmpeg ingest and Bluetooth ALSA loopback from the enabled
+  graph. The local-only branch may use FFmpeg's output-clock-driven async
+  resampler; it never sits in the Sendspin/distribution branch and therefore
+  cannot alter distributed sample timestamps.
 - Test SBC at 44.1 and 48 kHz plus any negotiated AAC codec supported by the
   installed BlueALSA build.
 
 Exit: no audible varispeed, no periodic gaps, and bounded correction under the
 device test matrix.
+
+Implementation status: the Bluetooth vertical slice is opt-in via
+`audio_engine.backend = "timestamped"`. The native engine exclusively captures
+BlueALSA and publishes versioned sample-timestamped frames over
+`SOCK_SEQPACKET`. Independent queues feed Sendspin, activity/VU monitoring, and
+local playback. Local playback adapts to the console DAC clock; Sendspin
+receives the captured PCM and sample timestamps unchanged. The installer
+enables exactly one of `phono-console-audio-engine.service` and the legacy
+`phono-console-bluetooth.service`.
 
 ### Phase 5 — Unified output and cleanup
 

@@ -9,6 +9,7 @@ PLAYER_ENV_FILE="$CONFIG_DIR/player.env"
 SERVICE_FILE="/etc/systemd/system/phono-console.service"
 PLAYER_SERVICE_FILE="/etc/systemd/system/phono-console-player.service"
 BLUETOOTH_SERVICE_FILE="/etc/systemd/system/phono-console-bluetooth.service"
+AUDIO_ENGINE_SERVICE_FILE="/etc/systemd/system/phono-console-audio-engine.service"
 ALSA_FILE="/etc/alsa/conf.d/99-phono-console.conf"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 config_backup=""
@@ -356,6 +357,19 @@ local_fallback_enabled = true
 distribution_recovery_hold_ms = 10000
 EOF
 fi
+if ! grep -q '^\[audio_engine\]' "$CONFIG_FILE"; then
+  cat >>"$CONFIG_FILE" <<'EOF'
+
+[audio_engine]
+backend = "legacy"
+socket_path = "/run/phono-console/audio-engine.sock"
+frame_ms = 20
+output_prebuffer_ms = 80
+route_fade_ms = 8
+max_soft_correction_ppm = 250
+queue_frames = 50
+EOF
+fi
 sed -i 's/^source_name = "Console Vinyl"/source_name = "Console Input"/' "$CONFIG_FILE"
 sed -i 's/^alias = "Phono Console"/alias = "PhonoConsole"/' "$CONFIG_FILE"
 
@@ -478,11 +492,24 @@ ln -sfn "$APP_DIR/current/player-venv/bin/sendspin" /usr/local/bin/sendspin
 install -m 0644 "$SOURCE_DIR/systemd/phono-console.service" "$SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-player.service" "$PLAYER_SERVICE_FILE"
 install -m 0644 "$SOURCE_DIR/systemd/phono-console-bluetooth.service" "$BLUETOOTH_SERVICE_FILE"
+install -m 0644 "$SOURCE_DIR/systemd/phono-console-audio-engine.service" "$AUDIO_ENGINE_SERVICE_FILE"
 install -d -m 0755 "$release_dir/bin"
 install -m 0755 "$SOURCE_DIR/scripts/bluetooth-ingest.sh" "$release_dir/bin/bluetooth-ingest"
 systemctl daemon-reload
-systemctl enable phono-console.service phono-console-player.service phono-console-bluetooth.service
-systemctl restart phono-console.service phono-console-player.service phono-console-bluetooth.service
+audio_engine_backend="$(config_value audio_engine backend)"
+systemctl enable phono-console.service phono-console-player.service
+if [[ "$audio_engine_backend" == "timestamped" ]]; then
+  touch "$CONFIG_DIR/timestamped-audio-engine"
+  systemctl disable --now phono-console-bluetooth.service || true
+  systemctl enable phono-console-audio-engine.service
+  systemctl restart phono-console-audio-engine.service
+else
+  rm -f "$CONFIG_DIR/timestamped-audio-engine"
+  systemctl disable --now phono-console-audio-engine.service || true
+  systemctl enable phono-console-bluetooth.service
+  systemctl restart phono-console-bluetooth.service
+fi
+systemctl restart phono-console-player.service phono-console.service
 healthy=false
 healthy_count=0
 for _attempt in $(seq 1 30); do

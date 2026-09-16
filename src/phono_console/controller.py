@@ -313,9 +313,15 @@ class Controller:
             await self._set_component(name, fallback_status, fallback_message)
 
     async def _set_router_component(self, route: Route) -> None:
-        process = getattr(self.audio_router, "local_loopback", None)
+        process = (
+            getattr(self.audio_router, "bluetooth_loopback", None)
+            if route is Route.LOCAL_BLUETOOTH
+            else getattr(self.audio_router, "local_loopback", None)
+        )
         health = getattr(process, "health", None)
-        if route is Route.LOCAL_PHONO and isinstance(health, dict):
+        if route in {Route.LOCAL_PHONO, Route.LOCAL_BLUETOOTH} and isinstance(
+            health, dict
+        ):
             payload = dict(health)
             status = str(payload.pop("status", "failed"))
             message = str(payload.pop("message", "unknown"))

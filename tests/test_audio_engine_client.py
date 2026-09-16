@@ -35,6 +35,9 @@ def test_fanout_is_bounded_and_reports_drops_and_sequence_gaps() -> None:
     assert metric.sequence_gaps == 1
     assert metric.dropped == 1
     assert fanout.queues[AudioSource.BLUETOOTH].qsize() == 2
+    queued = fanout.queues[AudioSource.BLUETOOTH]
+    assert (queued.get_nowait().flags & FrameFlags.DISCONTINUITY) == 0
+    assert queued.get_nowait().flags & FrameFlags.DISCONTINUITY
 
 
 def test_fanout_streams_each_source_independently() -> None:
