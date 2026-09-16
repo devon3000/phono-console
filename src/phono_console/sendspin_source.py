@@ -17,6 +17,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from .alsa import CaptureUnavailable
+from .audio_engine_protocol import FrameFlags, TimestampedPcm
 from .config import AudioConfig, SendspinConfig
 from .interfaces import EventSink
 from .policy import Source
@@ -27,9 +28,9 @@ LOGGER = logging.getLogger(__name__)
 IDENTITY_FILE = "identity.key"
 PAIRING_FILE = "pairing.json"
 TIME_SYNC_TIMEOUT_SECONDS = 10.0
-SIGNAL_RELEASE_SECONDS = 15.0
+SIGNAL_RELEASE_SECONDS = 1.0
 
-PcmStreamFactory = Callable[[], AsyncIterator[bytes]]
+PcmStreamFactory = Callable[[], AsyncIterator[bytes | TimestampedPcm]]
 ClientFactory = Callable[[], Awaitable[object]]
 
 
@@ -113,6 +114,7 @@ class SendspinSourcePublisher:
         signal_poll_seconds: float = 0.5,
         signal_release_seconds: float = SIGNAL_RELEASE_SECONDS,
         source_devices: dict[Source, str] | None = None,
+        pcm_stream_factories: dict[Source, PcmStreamFactory] | None = None,
     ) -> None:
         self.config = sendspin
         self.audio = audio
@@ -138,6 +140,10 @@ class SendspinSourcePublisher:
         self._source_devices = source_devices or {
             Source.PHONO: audio.capture_device,
         }
+        self._source_distribution_enabled = {
+            source: True for source in self._source_devices
+        }
+        self._pcm_stream_factories = pcm_stream_factories or {}
 
     async def set_distribution_enabled(self, enabled: bool) -> None:
         self._distribution_enabled = enabled
@@ -146,7 +152,19 @@ class SendspinSourcePublisher:
             await self._stop_streaming()
         await self._publish_state()
 
-    def _default_pcm_stream(self) -> AsyncIterator[bytes]:
+    async def set_source_distribution_enabled(
+        self, source: Source, enabled: bool
+    ) -> None:
+        self._source_distribution_enabled[source] = enabled
+        if source is self._selected_source and not enabled:
+            await self._send_signal(False)
+            await self._stop_streaming()
+        await self._publish_state()
+
+    def _default_pcm_stream(self) -> AsyncIterator[bytes | TimestampedPcm]:
+        factory = self._pcm_stream_factories.get(self._selected_source)
+        if factory is not None:
+            return factory()
         # 20 ms chunks keep feed timestamps fine-grained without hammering
         # the websocket.
         chunk_frames = max(1, self.audio.sample_rate // 50)
@@ -313,7 +331,19 @@ class SendspinSourcePublisher:
         frame_stride = self.audio.channels * 2
         try:
             async for chunk in stream:
-                frames = len(chunk) // frame_stride
+                if isinstance(chunk, TimestampedPcm):
+                    if chunk.flags & FrameFlags.DISCONTINUITY and captured_frames:
+                        raise CaptureUnavailable(
+                            "timestamped source capture crossed a discontinuity"
+                        )
+                    pcm = chunk.pcm
+                    timestamp_us = chunk.first_sample_time_us
+                    frames = chunk.frames
+                    await capture.feed(pcm, capture_timestamp_us=timestamp_us)
+                    captured_frames += frames
+                    continue
+                pcm = chunk
+                frames = len(pcm) // frame_stride
                 if capture_anchor_us is None:
                     client = self._client
                     clock = getattr(client, "now_us", None)
@@ -331,7 +361,7 @@ class SendspinSourcePublisher:
                     capture_anchor_us
                     + captured_frames * 1_000_000 // self.audio.sample_rate
                 )
-                await capture.feed(chunk, capture_timestamp_us=timestamp_us)
+                await capture.feed(pcm, capture_timestamp_us=timestamp_us)
                 captured_frames += frames
             error = "PCM capture ended unexpectedly"
         except asyncio.CancelledError:
@@ -459,7 +489,10 @@ class SendspinSourcePublisher:
                 if status is not None
                 else False
             )
-            if not self._distribution_enabled:
+            source_enabled = self._source_distribution_enabled.get(
+                selected or self._selected_source, True
+            )
+            if not self._distribution_enabled or not source_enabled:
                 active = False
                 absent_since = None
             elif detected:

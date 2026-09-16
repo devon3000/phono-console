@@ -1,5 +1,17 @@
 # Timestamped audio engine implementation plan
 
+## Implementation status
+
+Work is isolated on `feature/timestamped-audio-engine`.
+
+- Phase 0: legacy default and rollback path preserved.
+- Phase 1: native ALSA timestamp probe implemented and installed with releases;
+  awaiting execution against the UFO202 and BlueALSA PCMs on the target Pi.
+- Phase 2: versioned C/Python frame protocol, bounded Python fan-out, and exact
+  timestamp forwarding into Sendspin implemented with automated tests.
+- Timestamped backend activation remains intentionally blocked until the Phase
+  1 device gate passes. Selecting it cannot silently run the legacy graph.
+
 ## Purpose
 
 Replace the Bluetooth `BlueALSA -> FFmpeg -> ALSA loopback -> arecord` path and
@@ -141,7 +153,10 @@ Music Assistant/Sendspin time domain. They must not be controlled by two
 simultaneous adaptive resamplers.
 
 - Capture adapters use ALSA timestamps and frame positions to timestamp native
-  samples.
+  samples. A plugin timestamp is an observation of the sample clock, not
+  automatically the timestamp of the next emitted block. Noisy observations
+  are fitted against the monotonic cumulative sample counter over a bounded
+  window; emitted sample timestamps come from that fitted mapping.
 - Native-to-48 kHz conversion uses `libsamplerate` and preserves the source
   timeline through an explicit input-position/output-position mapping.
 - The Sendspin sink forwards capture timestamps. Sendspin is responsible for
@@ -339,14 +354,37 @@ Exit: phono priority, local fallback, MA return, and device-recovery tests pass.
 
 ### Phase 4 — Bluetooth vertical slice
 
-- Add BlueALSA capture, transport lifecycle, nominal resampling, timestamped
-  Sendspin frames, and local adaptive playback.
-- Remove FFmpeg and the Bluetooth ALSA loopback from the enabled graph.
+- Add exclusive BlueALSA capture, transport lifecycle, timestamped Sendspin
+  frames, and local adaptive playback.
+- Remove the legacy FFmpeg ingest and Bluetooth ALSA loopback from the enabled
+  graph. The local-only branch may use FFmpeg's output-clock-driven async
+  resampler; it never sits in the Sendspin/distribution branch and therefore
+  cannot alter distributed sample timestamps.
 - Test SBC at 44.1 and 48 kHz plus any negotiated AAC codec supported by the
   installed BlueALSA build.
 
 Exit: no audible varispeed, no periodic gaps, and bounded correction under the
 device test matrix.
+
+Implementation status: the Bluetooth vertical slice is opt-in via
+`audio_engine.backend = "timestamped"`. The native engine exclusively captures
+BlueALSA and publishes versioned sample-timestamped frames over
+`SOCK_SEQPACKET`. Independent queues feed Sendspin, activity/VU monitoring, and
+local playback. Local playback adapts to the console DAC clock; Sendspin
+receives the captured PCM and sample timestamps unchanged. The installer
+enables exactly one of `phono-console-audio-engine.service` and the legacy
+`phono-console-bluetooth.service`.
+
+Normal timestamped distribution does not start with a local route. On signal
+detection the controller requests the configured MA target immediately, keeps
+the physical output idle until the returned Sendspin player reports playback,
+and then opens only that return path. A bounded 500 ms capture pre-roll is fed
+with its original sample timestamps so MA's default 500 ms source bridge can
+retain the opening audio without trimming startup surplus. If distribution has
+not become ready within the configured startup timeout, the same pre-roll feeds
+the local fallback instead. Capture timestamps are never shifted into the
+future: Sendspin source timestamps describe capture time, not presentation
+time.
 
 ### Phase 5 — Unified output and cleanup
 

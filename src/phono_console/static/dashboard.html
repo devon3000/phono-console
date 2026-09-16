@@ -116,14 +116,19 @@
       </article>
 
       <article class="panel info-panel controls-panel">
-        <div class="panel-heading"><h2>Automatic routing</h2><span class="label">DISTRIBUTION</span></div>
-        <p class="muted">Signal selects the source automatically. Phono and Bluetooth play on Downstairs through Music Assistant; direct local output is the outage fallback.</p>
+        <div class="panel-heading"><h2>Output</h2><span class="label">ROUTING</span></div>
+        <p class="muted">Signal selects the source automatically. Downstairs stays selected through record changes, then returns to Console after an hour without a record.</p>
+        <span class="label">PHONO OUTPUT</span>
+        <div class="button-row mode-row" role="group" aria-label="Phono output">
+          <button id="phono-local" class="primary-button" type="button">CONSOLE</button>
+          <button id="phono-downstairs" class="secondary-button" type="button">SYNCHRONIZED DOWNSTAIRS</button>
+        </div>
         <div class="button-row">
           <button id="local-only" class="secondary-button" type="button">LOCAL ONLY</button>
           <button id="pairing-open" class="primary-button" type="button">PAIR PHONE</button>
           <button id="pairing-close" class="secondary-button" type="button">CLOSE PAIRING</button>
         </div>
-        <p id="control-result" class="control-result" aria-live="polite">No manual source selection required.</p>
+        <p id="control-result" class="control-result" aria-live="polite">Phono defaults to the lowest-latency console output.</p>
       </article>
 
       <article class="panel info-panel events-panel">

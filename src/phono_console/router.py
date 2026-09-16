@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from .policy import Route
-from .processes import ManagedProcess
+from typing import Protocol
+
+class RouteProcess(Protocol):
+    async def start(self) -> None: ...
+
+    async def stop(self) -> None: ...
 
 
 class ProcessAudioRouter:
@@ -15,9 +20,9 @@ class ProcessAudioRouter:
 
     def __init__(
         self,
-        local_loopback: ManagedProcess,
-        bluetooth_loopback: ManagedProcess | None = None,
-        ma_loopback: ManagedProcess | None = None,
+        local_loopback: RouteProcess,
+        bluetooth_loopback: RouteProcess | None = None,
+        ma_loopback: RouteProcess | None = None,
     ) -> None:
         self.local_loopback = local_loopback
         self.bluetooth_loopback = bluetooth_loopback

@@ -72,9 +72,11 @@ phono amplifier input, hardware monitor path, or physical input selector.
 - Phono signal becomes active: select phono automatically.
 - Otherwise, an actively streaming Bluetooth phone is selected automatically.
 - Otherwise, Music Assistant playback is selected.
-- Phono and Bluetooth are published through Sendspin to the configured
-  `Downstairs` Music Assistant group. The console consumes the synchronized MA
-  return along with the other rooms.
+- Phono defaults to direct console playback for the lowest practical latency.
+  A session-sticky user option switches records to synchronized `Downstairs`
+  playback through Music Assistant. It survives record changes, then returns
+  to local after a configurable inactive interval (60 minutes by default).
+- Bluetooth is published through Sendspin to `Downstairs` automatically.
 - If MA, Sendspin, or the network is unavailable, the selected phono/Bluetooth
   source falls back to the direct local output path.
 - Nothing is active: output silence.
@@ -98,7 +100,8 @@ pairing store under `/var/lib/phono-console/source`, streams only when the
 Music Assistant `sendspin_source` plugin requests it, and reports line-sense
 signal state from source activity. Pairing with Music Assistant is initiated
 once in its UI and remembered. The controller then starts Console Input on the
-fixed `Downstairs` target automatically whenever phono or Bluetooth wins.
+fixed `Downstairs` target automatically for Bluetooth. Phono is published only
+when its persistent output mode is **Synchronized Downstairs**.
 
 Run the target probe on the Raspberry Pi with:
 
@@ -146,6 +149,8 @@ initial endpoints are:
 - `POST /v1/levels/reset` — clears peak maxima and clipping latches
 - `PUT /v1/bluetooth/pairing` — opens or closes the time-limited pairing window
 - `POST /v1/bluetooth/device` — disconnects or forgets a paired device
+- `PUT /v1/phono-output` with `{"mode": "local"|"downstairs"}` — persistently
+  selects minimum-latency console or synchronized Downstairs playback for phono
 - `PUT /v1/whole-house` with `{\"enabled\": true|false}` — starts or stops the
   published vinyl source on the configured `whole_house_players` (legacy
   compatibility; normal source distribution is automatic).
@@ -154,9 +159,9 @@ A ready-to-copy Home Assistant package and setup instructions are in
 [home-assistant/](home-assistant/).
 
 The same service hosts a responsive dashboard at `http://PHONO_CONSOLE_IP:8765/`.
-Its **Local only** control persistently disables source publication and keeps
-phono/Bluetooth on the console speakers, including when Music Assistant is
-offline. Turn it off to restore automatic distribution to `Downstairs`.
+Its phono output control keeps **Synchronized Downstairs** across record changes
+and returns to **Console** after the configured inactive interval. **Local only** remains a separate global
+troubleshooting switch that forces both phono and Bluetooth to the console.
 Enter the generated API token once per browser tab to see the active route,
 stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
 Sendspin connectivity, component health/errors, configured devices, version,

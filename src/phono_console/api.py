@@ -8,12 +8,14 @@ from importlib.resources import files
 from aiohttp import web
 
 from .state import StateStore
+from .policy import PhonoOutputMode
 
 WholeHouseAction = Callable[[bool], Awaitable[None]]
 LevelResetAction = Callable[[], None]
 PairingAction = Callable[[], Awaitable[None]]
 BluetoothDeviceAction = Callable[[str, str], Awaitable[None]]
 LocalOnlyAction = Callable[[bool], Awaitable[None]]
+PhonoOutputAction = Callable[[PhonoOutputMode], Awaitable[None]]
 PUBLIC_PATHS = frozenset(("/", "/assets/dashboard.css", "/assets/dashboard.js"))
 
 
@@ -34,6 +36,7 @@ class ControlApi:
         pairing_close_action: PairingAction | None = None,
         bluetooth_device_action: BluetoothDeviceAction | None = None,
         local_only_action: LocalOnlyAction | None = None,
+        phono_output_action: PhonoOutputAction | None = None,
     ) -> None:
         self.state = state
         self.token = token
@@ -44,6 +47,7 @@ class ControlApi:
         self.pairing_close_action = pairing_close_action
         self.bluetooth_device_action = bluetooth_device_action
         self.local_only_action = local_only_action
+        self.phono_output_action = phono_output_action
         self._whole_house_lock = asyncio.Lock()
 
     @web.middleware
@@ -148,6 +152,27 @@ class ControlApi:
         )
         return web.json_response({"enabled": enabled})
 
+    async def set_phono_output(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        try:
+            mode = PhonoOutputMode(body.get("mode"))
+        except (TypeError, ValueError) as exc:
+            raise web.HTTPBadRequest(
+                text="mode must be local or downstairs"
+            ) from exc
+        if self.phono_output_action is not None:
+            try:
+                await self.phono_output_action(mode)
+            except WholeHouseError as exc:
+                raise web.HTTPConflict(text=str(exc)) from exc
+            except Exception as exc:
+                raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+        await self.state.set_phono_output_mode(mode)
+        await self.state.emit(
+            "phono_output_mode_changed", {"mode": mode.value, "source": "api"}
+        )
+        return web.json_response({"mode": mode.value})
+
     async def set_whole_house(self, request: web.Request) -> web.Response:
         body = await request.json()
         requested = body.get("enabled")
@@ -221,6 +246,7 @@ class ControlApi:
                 web.put("/v1/bluetooth/pairing", self.set_bluetooth_pairing),
                 web.post("/v1/bluetooth/device", self.bluetooth_device),
                 web.put("/v1/local-only", self.set_local_only),
+                web.put("/v1/phono-output", self.set_phono_output),
                 web.put("/v1/whole-house", self.set_whole_house),
             ]
         )

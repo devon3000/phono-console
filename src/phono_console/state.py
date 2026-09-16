@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from .controller import Status
 from .levels import LevelSession, StereoLevel
+from .policy import PhonoOutputMode
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class StateStore:
         self.status: Status | None = None
         self.whole_house_requested = False
         self.local_playback_only = False
+        self.phono_output_mode = PhonoOutputMode.LOCAL
         self.sendspin_source: dict[str, object] = {}
         self.music_assistant: dict[str, object] = {}
         self.bluetooth: dict[str, object] = {}
@@ -135,6 +137,11 @@ class StateStore:
             self.local_playback_only = enabled
             self.changed.notify_all()
 
+    async def set_phono_output_mode(self, mode: PhonoOutputMode) -> None:
+        async with self.changed:
+            self.phono_output_mode = mode
+            self.changed.notify_all()
+
     async def emit(self, event: str, details: dict[str, object]) -> None:
         async with self.changed:
             self.events.append(
@@ -152,6 +159,7 @@ class StateStore:
             "status": status,
             "whole_house_requested": self.whole_house_requested,
             "local_playback_only": self.local_playback_only,
+            "phono_output_mode": self.phono_output_mode.value,
             "sendspin_source": dict(self.sendspin_source),
             "music_assistant": dict(self.music_assistant),
             "bluetooth": dict(self.bluetooth),

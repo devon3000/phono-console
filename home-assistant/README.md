@@ -24,5 +24,6 @@
 
 The package exposes the automatically selected source, effective distribution
 path, input levels, phono/Bluetooth activity, and Sendspin status. There is no
-manual source control: phono and Bluetooth normally play on `Downstairs`
-through Music Assistant and use direct local output only as an outage fallback.
+manual source control. Phono defaults to minimum-latency console playback and
+has a sticky Console/Downstairs output choice in the web dashboard; Bluetooth
+normally distributes through Music Assistant.

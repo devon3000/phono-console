@@ -49,6 +49,7 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert 'PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"' in installer
     assert "type dmix" not in installer
     assert (ROOT / "systemd" / "phono-console-bluetooth.service").is_file()
+    assert (ROOT / "systemd" / "phono-console-audio-engine.service").is_file()
     bluetooth_unit = (
         ROOT / "systemd" / "phono-console-bluetooth.service"
     ).read_text()
@@ -59,7 +60,17 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "first_pts" not in ingest
     assert "input_rate" in ingest
     assert "console_bt_playback48" in ingest
-    assert "curl ffmpeg libportaudio2" in installer
+    assert "timestamped-audio-engine" in installer
+    assert "--timestamped) requested_audio_backend=\"timestamped\"" in installer
+    assert "--legacy) requested_audio_backend=\"legacy\"" in installer
+    assert "systemctl disable --now phono-console-bluetooth.service" in installer
+    engine_unit = (
+        ROOT / "systemd" / "phono-console-audio-engine.service"
+    ).read_text()
+    assert "phono-audio-engine serve" in engine_unit
+    assert "RuntimeDirectory=phono-console" in engine_unit
+    for package in ("curl", "ffmpeg", "libportaudio2"):
+        assert package in installer
 
 
 def test_installer_migrates_the_legacy_null_capture() -> None:
@@ -75,3 +86,11 @@ def test_dashboard_assets_are_declared_as_package_data() -> None:
     assert '[tool.setuptools.package-data]' in project
     for asset in ("dashboard.html", "dashboard.css", "dashboard.js"):
         assert (ROOT / "src" / "phono_console" / "static" / asset).is_file()
+
+
+def test_installer_builds_native_timestamp_probe() -> None:
+    installer = (ROOT / "scripts" / "install.sh").read_text()
+    assert "libasound2-dev" in installer
+    assert "libsamplerate0-dev" in installer
+    assert 'make -C "$SOURCE_DIR/native"' in installer
+    assert '"$release_dir/phono-audio-engine"' in installer

@@ -197,3 +197,27 @@ def test_api_controls_local_only_mode() -> None:
             await client.close()
 
     asyncio.run(scenario())
+
+
+def test_api_controls_sticky_phono_output_mode() -> None:
+    async def scenario() -> None:
+        calls = []
+
+        async def action(mode) -> None:
+            calls.append(mode.value)
+
+        state = StateStore()
+        api = ControlApi(state, None, phono_output_action=action)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.put(
+                "/v1/phono-output", json={"mode": "downstairs"}
+            )
+            assert response.status == 200
+            assert calls == ["downstairs"]
+            assert state.snapshot()["phono_output_mode"] == "downstairs"
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())

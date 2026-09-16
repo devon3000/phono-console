@@ -14,6 +14,7 @@ from .policy import (
     Inputs,
     Route,
     Source,
+    PhonoOutputMode,
     choose_route,
     route_distribution,
     route_source,
@@ -46,8 +47,14 @@ class Controller:
         status_sink: StatusSink | None = None,
         bluetooth_monitor: LevelMonitor | None = None,
         distribution_available: Callable[[], bool | Awaitable[bool]] | None = None,
+        distribution_capable: Callable[
+            [Source], bool | Awaitable[bool]
+        ] | None = None,
         prepare_distribution: Callable[[Source], Awaitable[bool]] | None = None,
         release_distribution: Callable[[], Awaitable[None]] | None = None,
+        phono_output_mode: Callable[[], PhonoOutputMode] | None = None,
+        expire_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
+        refresh_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.config = config
         self.level_monitor = level_monitor
@@ -57,8 +64,14 @@ class Controller:
         self.status_sink = status_sink
         self.bluetooth_monitor = bluetooth_monitor
         self.distribution_available = distribution_available
+        self.distribution_capable = distribution_capable
         self.prepare_distribution = prepare_distribution
         self.release_distribution = release_distribution
+        self.phono_output_mode = phono_output_mode or (lambda: PhonoOutputMode.LOCAL)
+        self.expire_phono_output_mode = expire_phono_output_mode
+        self.refresh_phono_output_mode = refresh_phono_output_mode
+        self._phono_mode_inactive_since: float | None = None
+        self._phono_mode_last_refresh: float | None = None
         self.detector = ActivityDetector(
             threshold_dbfs=config.detection.phono_threshold_dbfs,
             attack_seconds=config.detection.attack_ms / 1000,
@@ -74,6 +87,8 @@ class Controller:
         self.route: Route | None = None
         self._last_route_error: str | None = None
         self._distribution_healthy_since: float | None = None
+        self._distribution_pending_source: Source | None = None
+        self._distribution_pending_since: float | None = None
 
     async def _distribution_ready(self, now: float) -> bool:
         if self.distribution_available is None:
@@ -89,6 +104,12 @@ class Controller:
         # causing the handoff to oscillate for the duration of the hold.
         self._distribution_healthy_since = now
         return True
+
+    async def _distribution_is_capable(self, source: Source) -> bool:
+        if self.distribution_capable is None:
+            return False
+        result = self.distribution_capable(source)
+        return await result if hasattr(result, "__await__") else bool(result)
 
     async def tick(self, now: float | None = None) -> Status:
         timestamp = time.monotonic() if now is None else now
@@ -120,6 +141,33 @@ class Controller:
             await self._set_component("music_assistant", "degraded", str(exc))
         whole_house = await self.music_assistant.whole_house_is_requested()
         phono_active = capture_ok and self.detector.update(level, timestamp)
+        output_mode = self.phono_output_mode()
+        if output_mode is PhonoOutputMode.DOWNSTAIRS:
+            if phono_active:
+                self._phono_mode_inactive_since = None
+                if (
+                    self.refresh_phono_output_mode is not None
+                    and (
+                        self._phono_mode_last_refresh is None
+                        or timestamp - self._phono_mode_last_refresh >= 60
+                    )
+                ):
+                    await self.refresh_phono_output_mode()
+                    self._phono_mode_last_refresh = timestamp
+            elif self._phono_mode_inactive_since is None:
+                self._phono_mode_inactive_since = timestamp
+            elif (
+                timestamp - self._phono_mode_inactive_since
+                >= self.config.routing.phono_mode_sticky_minutes * 60
+            ):
+                if self.expire_phono_output_mode is not None:
+                    await self.expire_phono_output_mode()
+                output_mode = PhonoOutputMode.LOCAL
+                self._phono_mode_inactive_since = None
+                self._phono_mode_last_refresh = None
+        else:
+            self._phono_mode_inactive_since = None
+            self._phono_mode_last_refresh = None
         bluetooth_level = -120.0
         bluetooth_active = False
         bluetooth_capture_ok = self.bluetooth_monitor is not None
@@ -143,8 +191,43 @@ class Controller:
                     level_dbfs=bluetooth_level,
                 )
         available = await self._distribution_ready(timestamp)
-        inputs = Inputs(phono_active, bluetooth_active, ma_playing, available)
-        desired_route = choose_route(inputs)
+        selected_source = (
+            Source.PHONO
+            if phono_active
+            else (Source.BLUETOOTH if bluetooth_active else Source.NONE)
+        )
+        distribution_pending = False
+        capable = await self._distribution_is_capable(selected_source)
+        if selected_source is not Source.NONE and not available and capable:
+            if self._distribution_pending_source is not selected_source:
+                self._distribution_pending_source = selected_source
+                self._distribution_pending_since = timestamp
+                try:
+                    if self.prepare_distribution is not None:
+                        await self.prepare_distribution(selected_source)
+                except Exception as exc:
+                    self._distribution_pending_since = timestamp - (
+                        self.config.routing.distribution_start_timeout_ms / 1000
+                    )
+                    await self._set_component(
+                        "distribution", "degraded", str(exc)
+                    )
+            if self._distribution_pending_since is not None:
+                elapsed_ms = (
+                    timestamp - self._distribution_pending_since
+                ) * 1000
+                distribution_pending = (
+                    elapsed_ms
+                    < self.config.routing.distribution_start_timeout_ms
+                )
+        elif available or selected_source is Source.NONE:
+            self._distribution_pending_source = None
+            self._distribution_pending_since = None
+
+        inputs = Inputs(
+            phono_active, bluetooth_active, ma_playing, available, output_mode
+        )
+        desired_route = Route.IDLE if distribution_pending else choose_route(inputs)
         # Once Music Assistant has requested a source stream, its source.stop
         # command is the authority for ending that distributed session.  The
         # local level detector can briefly read silence while ALSA consumers
@@ -154,14 +237,14 @@ class Controller:
         # higher-priority phono input to preempt Bluetooth and Bluetooth to
         # take over after phono has genuinely released.
         if available:
-            if self.route is Route.DISTRIBUTED_BLUETOOTH and not phono_active:
+            if (
+                self.route is Route.DISTRIBUTED_BLUETOOTH
+                and bluetooth_active
+                and not phono_active
+            ):
                 desired_route = Route.DISTRIBUTED_BLUETOOTH
-            elif self.route is Route.DISTRIBUTED_PHONO and not phono_active:
-                desired_route = (
-                    Route.DISTRIBUTED_BLUETOOTH
-                    if bluetooth_active
-                    else Route.DISTRIBUTED_PHONO
-                )
+            elif self.route is Route.DISTRIBUTED_PHONO and phono_active:
+                desired_route = Route.DISTRIBUTED_PHONO
         was_distributed = self.route in {
             Route.DISTRIBUTED_PHONO,
             Route.DISTRIBUTED_BLUETOOTH,
@@ -195,7 +278,13 @@ class Controller:
             if not prepared:
                 self._distribution_healthy_since = None
                 desired_route = choose_route(
-                    Inputs(phono_active, bluetooth_active, ma_playing, False)
+                    Inputs(
+                        phono_active,
+                        bluetooth_active,
+                        ma_playing,
+                        False,
+                        output_mode,
+                    )
                 )
         route = desired_route
 
@@ -313,9 +402,15 @@ class Controller:
             await self._set_component(name, fallback_status, fallback_message)
 
     async def _set_router_component(self, route: Route) -> None:
-        process = getattr(self.audio_router, "local_loopback", None)
+        process = (
+            getattr(self.audio_router, "bluetooth_loopback", None)
+            if route is Route.LOCAL_BLUETOOTH
+            else getattr(self.audio_router, "local_loopback", None)
+        )
         health = getattr(process, "health", None)
-        if route is Route.LOCAL_PHONO and isinstance(health, dict):
+        if route in {Route.LOCAL_PHONO, Route.LOCAL_BLUETOOTH} and isinstance(
+            health, dict
+        ):
             payload = dict(health)
             status = str(payload.pop("status", "failed"))
             message = str(payload.pop("message", "unknown"))

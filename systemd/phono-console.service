@@ -1,7 +1,7 @@
 [Unit]
 Description=Phono Console audio router
-Wants=network-online.target sound.target
-After=network-online.target sound.target
+Wants=network-online.target sound.target phono-console-audio-engine.service
+After=network-online.target sound.target phono-console-audio-engine.service
 
 [Service]
 Type=simple

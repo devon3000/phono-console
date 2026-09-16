@@ -1,7 +1,8 @@
 from pathlib import Path
 
-from phono_console.config import load_config
 import pytest
+
+from phono_console.config import load_config
 
 from phono_console.runtime import (
     local_loopback_command,
