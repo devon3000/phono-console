@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "phono_audio/probe.h"
+#include "phono_audio/clock_estimator.h"
 
 #include <alsa/asoundlib.h>
 #include <alloca.h>
@@ -94,6 +95,9 @@ int phono_run_probe(const struct phono_probe_options *options) {
     unsigned int xruns = 0;
     int64_t previous_first_us = 0;
     snd_pcm_sframes_t previous_frames = 0;
+    struct phono_clock_estimator clock_estimator;
+    phono_clock_reset(&clock_estimator);
+    int64_t last_progress_us = monotonic_us();
 
     while (monotonic_us() < finish_at) {
         error = snd_pcm_wait(pcm, 1000);
@@ -137,10 +141,32 @@ int phono_run_probe(const struct phono_probe_options *options) {
                hardware_us, first_sample_us, actual_delta_us,
                expected_delta_us, delta_error_us, xruns);
         fflush(stdout);
+        phono_clock_observe(&clock_estimator, total_frames, first_sample_us);
+        if (sequence > 0 && sequence % 50U == 0) {
+            struct phono_clock_fit fit;
+            if (phono_clock_fit(&clock_estimator, &fit)) {
+                const long double fitted_rate = phono_clock_rate_hz(&fit);
+                const long double rate_error_ppm =
+                    (fitted_rate - (long double)rate) * 1000000.0L / rate;
+                printf("{\"event\":\"clock_fit\",\"sequence\":%" PRIu64
+                       ",\"observations\":%zu,\"rate_hz\":%.9Lf,"
+                       "\"rate_error_ppm\":%.3Lf,"
+                       "\"rms_residual_us\":%.3Lf}\n",
+                       sequence, fit.observations, fitted_rate,
+                       rate_error_ppm, fit.rms_residual_us);
+                fflush(stdout);
+            }
+        }
         previous_first_us = first_sample_us;
         previous_frames = frames;
         total_frames += (uint64_t)frames;
         sequence++;
+        const int64_t progress_us = monotonic_us();
+        if (progress_us - last_progress_us >= INT64_C(5000000)) {
+            fprintf(stderr, "probe progress: %.1f / %u seconds\n",
+                    (double)total_frames / rate, options->seconds);
+            last_progress_us = progress_us;
+        }
     }
 
     if (error < 0) fail_alsa("capture probe", error);

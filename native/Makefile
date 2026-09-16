@@ -17,12 +17,12 @@ all: $(PROBE)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(PROBE): src/main.c src/probe.c include/phono_audio/probe.h include/phono_audio/protocol.h | $(BUILD_DIR)
+$(PROBE): src/main.c src/probe.c src/clock_estimator.c include/phono_audio/probe.h include/phono_audio/protocol.h include/phono_audio/clock_estimator.h | $(BUILD_DIR)
 	@test -n "$(ALSA_LIBS)" || { echo "alsa development files not found (install libasound2-dev)" >&2; exit 1; }
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(ALSA_CFLAGS) -Iinclude src/main.c src/probe.c $(LDFLAGS) $(ALSA_LIBS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(ALSA_CFLAGS) -Iinclude src/main.c src/probe.c src/clock_estimator.c $(LDFLAGS) $(ALSA_LIBS) -lm -o $@
 
-$(PROTOCOL_TEST): tests/test_protocol.c include/phono_audio/protocol.h | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Iinclude tests/test_protocol.c $(LDFLAGS) -o $@
+$(PROTOCOL_TEST): tests/test_protocol.c src/clock_estimator.c include/phono_audio/protocol.h include/phono_audio/clock_estimator.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Iinclude tests/test_protocol.c src/clock_estimator.c $(LDFLAGS) -lm -o $@
 
 test: $(PROTOCOL_TEST)
 	$(PROTOCOL_TEST)

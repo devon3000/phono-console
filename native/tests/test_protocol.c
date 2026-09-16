@@ -1,8 +1,11 @@
 #include "phono_audio/protocol.h"
+#include "phono_audio/clock_estimator.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
 
 int main(void) {
     const struct phono_audio_frame_header header = {
@@ -34,6 +37,30 @@ int main(void) {
     assert((int32_t)phono_get_u32le(wire + 44) == 175000);
     assert(phono_get_u32le(wire + 48) == 7);
     assert(phono_get_u32le(wire + 52) == 3840);
+
+    struct phono_clock_estimator estimator;
+    phono_clock_reset(&estimator);
+    const long double actual_rate = 48001.5L;
+    for (uint64_t index = 0; index < 1000; index++) {
+        const uint64_t sample = index * 960U;
+        const long double ideal = 2000000.0L +
+            (long double)sample * 1000000.0L / actual_rate;
+        uint64_t mixed = index + UINT64_C(0x9e3779b97f4a7c15);
+        mixed = (mixed ^ (mixed >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+        mixed = (mixed ^ (mixed >> 27)) * UINT64_C(0x94d049bb133111eb);
+        mixed ^= mixed >> 31;
+        const int64_t jitter = (int64_t)(mixed % 30001U) - 15000;
+        phono_clock_observe(&estimator, sample, (int64_t)llroundl(ideal) + jitter);
+    }
+    struct phono_clock_fit fit;
+    assert(phono_clock_fit(&estimator, &fit));
+    assert(fabsl(phono_clock_rate_hz(&fit) - actual_rate) < 5.0L);
+    assert(fit.rms_residual_us > 8000 && fit.rms_residual_us < 10000);
+    const int64_t predicted = phono_clock_timestamp(&fit, 960U * 1000U);
+    const int64_t expected = (int64_t)llroundl(
+        2000000.0L + 960000.0L * 1000000.0L / actual_rate
+    );
+    assert(llabs(predicted - expected) < 5000);
     puts("protocol test passed");
     return 0;
 }
