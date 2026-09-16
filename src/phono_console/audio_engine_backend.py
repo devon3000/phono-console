@@ -21,6 +21,7 @@ class TimestampedBluetoothBackend:
     client: AudioEngineClient
     monitor: TimestampedLevelMonitor
     playback: TimestampedLocalPlayback
+    replay_frames: int
 
     @classmethod
     def create(
@@ -51,13 +52,13 @@ class TimestampedBluetoothBackend:
             config.audio.channels,
             events,
         )
-        return cls(client, monitor, playback)
+        return cls(client, monitor, playback, replay_frames)
 
     @property
     def pcm_stream_factories(self) -> dict[Source, PcmStreamFactory]:
         return {
             Source.BLUETOOTH: lambda: self.client.frames(
-                AudioSource.BLUETOOTH
+                AudioSource.BLUETOOTH, replay_frames=self.replay_frames
             )
         }
 

@@ -375,6 +375,17 @@ receives the captured PCM and sample timestamps unchanged. The installer
 enables exactly one of `phono-console-audio-engine.service` and the legacy
 `phono-console-bluetooth.service`.
 
+Normal timestamped distribution does not start with a local route. On signal
+detection the controller requests the configured MA target immediately, keeps
+the physical output idle until the returned Sendspin player reports playback,
+and then opens only that return path. A bounded 500 ms capture pre-roll is fed
+with its original sample timestamps so MA's default 500 ms source bridge can
+retain the opening audio without trimming startup surplus. If distribution has
+not become ready within the configured startup timeout, the same pre-roll feeds
+the local fallback instead. Capture timestamps are never shifted into the
+future: Sendspin source timestamps describe capture time, not presentation
+time.
+
 ### Phase 5 — Unified output and cleanup
 
 - Move MA-return rendering into the engine and remove runtime-managed

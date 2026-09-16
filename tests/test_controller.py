@@ -181,7 +181,7 @@ def test_distribution_is_released_when_source_signal_ends() -> None:
     asyncio.run(scenario())
 
 
-def test_distributed_bluetooth_stays_latched_during_detector_gap() -> None:
+def test_distributed_bluetooth_releases_after_detector_hold() -> None:
     async def scenario() -> None:
         phono = SimulatedLevelMonitor()
         bluetooth = SimulatedLevelMonitor()
@@ -218,6 +218,74 @@ def test_distributed_bluetooth_stays_latched_during_detector_gap() -> None:
         await subject.tick(now=13)
         assert subject.route is Route.DISTRIBUTED_BLUETOOTH
         assert released == []
+        await subject.tick(now=16)
+        assert subject.route is Route.IDLE
+        assert released == [True]
+
+    asyncio.run(scenario())
+
+
+def test_timestamped_distribution_waits_silently_then_switches_to_ma() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor()
+        bluetooth = SimulatedLevelMonitor()
+        bluetooth.level = -20.0
+        ma = SimulatedMusicAssistant()
+        router = SimulatedAudioRouter()
+        ready = False
+        prepared = []
+
+        async def prepare(source):
+            prepared.append(source.value)
+            return ready
+
+        subject = Controller(
+            config(),
+            phono,
+            ma,
+            router,
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            distribution_available=lambda: ready,
+            distribution_capable=lambda source: source.value == "bluetooth",
+            prepare_distribution=prepare,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.IDLE
+        assert prepared == ["bluetooth"]
+        await subject.tick(now=1)
+        assert prepared == ["bluetooth"]
+
+        ready = True
+        ma.playing = True
+        await subject.tick(now=1.1)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        assert prepared == ["bluetooth", "bluetooth"]
+
+    asyncio.run(scenario())
+
+
+def test_timestamped_distribution_falls_back_locally_after_timeout() -> None:
+    async def scenario() -> None:
+        bluetooth = SimulatedLevelMonitor()
+        bluetooth.level = -20.0
+        subject = Controller(
+            config(),
+            SimulatedLevelMonitor(),
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            distribution_available=lambda: False,
+            distribution_capable=lambda _source: True,
+            prepare_distribution=lambda _source: asyncio.sleep(0, result=False),
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.IDLE
+        await subject.tick(now=5.3)
+        assert subject.route is Route.LOCAL_BLUETOOTH
 
     asyncio.run(scenario())
 

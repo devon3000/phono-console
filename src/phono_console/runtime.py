@@ -226,10 +226,27 @@ async def run_daemon(config: Config) -> None:
             and music_assistant.console_playing
         )
 
+    def distribution_capable(source: Source) -> bool:
+        return bool(
+            source is Source.BLUETOOTH
+            and timestamped_bluetooth is not None
+            and not state.local_playback_only
+            and publisher is not None
+            and publisher.client_id is not None
+            and state.sendspin_source.get("connected")
+            and state.music_assistant.get("connected")
+        )
+
     async def prepare_distribution(source: Source) -> bool:
         if publisher is None or publisher.client_id is None:
             return False
         await publisher.select_source(source)
+        if not state.sendspin_source.get("stream_requested"):
+            started = await music_assistant.play_vinyl_source(
+                publisher.client_id, (config.routing.distribution_target,)
+            )
+            if not started:
+                return False
         return bool(state.sendspin_source.get("stream_requested"))
 
     controller = Controller(
@@ -241,6 +258,7 @@ async def run_daemon(config: Config) -> None:
         status_sink=state,
         bluetooth_monitor=bluetooth_monitor,
         distribution_available=distribution_available,
+        distribution_capable=distribution_capable,
         prepare_distribution=prepare_distribution,
         release_distribution=lambda: music_assistant.stop_players(
             (config.routing.distribution_target,)

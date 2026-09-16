@@ -46,6 +46,9 @@ class Controller:
         status_sink: StatusSink | None = None,
         bluetooth_monitor: LevelMonitor | None = None,
         distribution_available: Callable[[], bool | Awaitable[bool]] | None = None,
+        distribution_capable: Callable[
+            [Source], bool | Awaitable[bool]
+        ] | None = None,
         prepare_distribution: Callable[[Source], Awaitable[bool]] | None = None,
         release_distribution: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -57,6 +60,7 @@ class Controller:
         self.status_sink = status_sink
         self.bluetooth_monitor = bluetooth_monitor
         self.distribution_available = distribution_available
+        self.distribution_capable = distribution_capable
         self.prepare_distribution = prepare_distribution
         self.release_distribution = release_distribution
         self.detector = ActivityDetector(
@@ -74,6 +78,8 @@ class Controller:
         self.route: Route | None = None
         self._last_route_error: str | None = None
         self._distribution_healthy_since: float | None = None
+        self._distribution_pending_source: Source | None = None
+        self._distribution_pending_since: float | None = None
 
     async def _distribution_ready(self, now: float) -> bool:
         if self.distribution_available is None:
@@ -89,6 +95,12 @@ class Controller:
         # causing the handoff to oscillate for the duration of the hold.
         self._distribution_healthy_since = now
         return True
+
+    async def _distribution_is_capable(self, source: Source) -> bool:
+        if self.distribution_capable is None:
+            return False
+        result = self.distribution_capable(source)
+        return await result if hasattr(result, "__await__") else bool(result)
 
     async def tick(self, now: float | None = None) -> Status:
         timestamp = time.monotonic() if now is None else now
@@ -143,8 +155,41 @@ class Controller:
                     level_dbfs=bluetooth_level,
                 )
         available = await self._distribution_ready(timestamp)
+        selected_source = (
+            Source.PHONO
+            if phono_active
+            else (Source.BLUETOOTH if bluetooth_active else Source.NONE)
+        )
+        distribution_pending = False
+        capable = await self._distribution_is_capable(selected_source)
+        if selected_source is not Source.NONE and not available and capable:
+            if self._distribution_pending_source is not selected_source:
+                self._distribution_pending_source = selected_source
+                self._distribution_pending_since = timestamp
+                try:
+                    if self.prepare_distribution is not None:
+                        await self.prepare_distribution(selected_source)
+                except Exception as exc:
+                    self._distribution_pending_since = timestamp - (
+                        self.config.routing.distribution_start_timeout_ms / 1000
+                    )
+                    await self._set_component(
+                        "distribution", "degraded", str(exc)
+                    )
+            if self._distribution_pending_since is not None:
+                elapsed_ms = (
+                    timestamp - self._distribution_pending_since
+                ) * 1000
+                distribution_pending = (
+                    elapsed_ms
+                    < self.config.routing.distribution_start_timeout_ms
+                )
+        elif available or selected_source is Source.NONE:
+            self._distribution_pending_source = None
+            self._distribution_pending_since = None
+
         inputs = Inputs(phono_active, bluetooth_active, ma_playing, available)
-        desired_route = choose_route(inputs)
+        desired_route = Route.IDLE if distribution_pending else choose_route(inputs)
         # Once Music Assistant has requested a source stream, its source.stop
         # command is the authority for ending that distributed session.  The
         # local level detector can briefly read silence while ALSA consumers
@@ -154,14 +199,14 @@ class Controller:
         # higher-priority phono input to preempt Bluetooth and Bluetooth to
         # take over after phono has genuinely released.
         if available:
-            if self.route is Route.DISTRIBUTED_BLUETOOTH and not phono_active:
+            if (
+                self.route is Route.DISTRIBUTED_BLUETOOTH
+                and bluetooth_active
+                and not phono_active
+            ):
                 desired_route = Route.DISTRIBUTED_BLUETOOTH
-            elif self.route is Route.DISTRIBUTED_PHONO and not phono_active:
-                desired_route = (
-                    Route.DISTRIBUTED_BLUETOOTH
-                    if bluetooth_active
-                    else Route.DISTRIBUTED_PHONO
-                )
+            elif self.route is Route.DISTRIBUTED_PHONO and phono_active:
+                desired_route = Route.DISTRIBUTED_PHONO
         was_distributed = self.route in {
             Route.DISTRIBUTED_PHONO,
             Route.DISTRIBUTED_BLUETOOTH,
