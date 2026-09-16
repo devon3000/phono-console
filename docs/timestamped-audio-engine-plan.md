@@ -153,7 +153,10 @@ Music Assistant/Sendspin time domain. They must not be controlled by two
 simultaneous adaptive resamplers.
 
 - Capture adapters use ALSA timestamps and frame positions to timestamp native
-  samples.
+  samples. A plugin timestamp is an observation of the sample clock, not
+  automatically the timestamp of the next emitted block. Noisy observations
+  are fitted against the monotonic cumulative sample counter over a bounded
+  window; emitted sample timestamps come from that fitted mapping.
 - Native-to-48 kHz conversion uses `libsamplerate` and preserves the source
   timeline through an explicit input-position/output-position mapping.
 - The Sendspin sink forwards capture timestamps. Sendspin is responsible for

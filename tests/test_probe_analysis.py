@@ -37,3 +37,6 @@ def test_probe_summary_reports_sample_timeline_error(tmp_path: Path) -> None:
     assert summary["captured_seconds"] == 0.06
     assert summary["span_drift_ppm"] == 0
     assert summary["delta_error_us"]["max_abs"] == 0
+    assert summary["sample_clock_fit"]["rate_hz"] == 48_000
+    assert summary["sample_clock_fit"]["rate_error_ppm"] == 0
+    assert summary["sample_clock_fit"]["residual_max_abs_us"] == 0
