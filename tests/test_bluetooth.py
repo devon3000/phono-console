@@ -1,6 +1,6 @@
 import asyncio
 
-from phono_console.bluetooth import BluetoothManager
+from phono_console.bluetooth import BluetoothManager, parse_player_show
 from phono_console.config import BluetoothConfig
 from phono_console.simulation import SimulatedEventSink
 from phono_console.state import StateStore
@@ -21,6 +21,55 @@ class FakeProcess:
     def __init__(self) -> None:
         self.returncode = None
         self.stdin = FakeStdin()
+
+
+def test_parse_player_show_extracts_transport_and_track_metadata() -> None:
+    state = parse_player_show(
+        """Player /org/bluez/hci0/dev_AA_BB/player0 [default]
+        Name: iPhone
+        Status: playing
+        Position: 42000
+        Track.Title: So What
+        Track.Artist: Miles Davis
+        Track.Album: Kind of Blue
+        Track.Duration: 545000
+        """
+    )
+
+    assert state["media_available"] is True
+    assert state["media_status"] == "playing"
+    assert state["media_position_ms"] == 42000
+    assert state["media_track"] == {
+        "title": "So What",
+        "artist": "Miles Davis",
+        "album": "Kind of Blue",
+        "duration_ms": 545000,
+    }
+
+
+def test_media_command_uses_bluetoothctl_player_transport() -> None:
+    async def scenario() -> None:
+        calls: list[tuple[str, ...]] = []
+
+        async def command_runner(*args: str) -> tuple[int, str, str]:
+            calls.append(args)
+            if args == ("player.show",):
+                return 0, "Player /player/0\nStatus: paused\n", ""
+            return 0, "", ""
+
+        state = StateStore()
+        manager = BluetoothManager(
+            BluetoothConfig(),
+            SimulatedEventSink(),
+            state,
+            command_runner=command_runner,
+        )
+        await manager.media_command("pause")
+
+        assert calls == [("player.pause",), ("player.show",)]
+        assert manager.playback_status == "paused"
+
+    asyncio.run(scenario())
 
 
 def test_disabled_bluetooth_manager_degrades_nothing() -> None:

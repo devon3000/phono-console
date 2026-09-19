@@ -15,6 +15,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
+from typing import Protocol
 
 from .alsa import CaptureUnavailable
 from .audio_engine_protocol import FrameFlags, TimestampedPcm
@@ -32,6 +33,13 @@ SIGNAL_RELEASE_SECONDS = 1.0
 
 PcmStreamFactory = Callable[[], AsyncIterator[bytes | TimestampedPcm]]
 ClientFactory = Callable[[], Awaitable[object]]
+
+
+class BluetoothMedia(Protocol):
+    @property
+    def playback_status(self) -> str | None: ...
+
+    async def media_command(self, command: str) -> None: ...
 
 
 async def arecord_pcm_stream(
@@ -115,6 +123,7 @@ class SendspinSourcePublisher:
         signal_release_seconds: float = SIGNAL_RELEASE_SECONDS,
         source_devices: dict[Source, str] | None = None,
         pcm_stream_factories: dict[Source, PcmStreamFactory] | None = None,
+        bluetooth_media: BluetoothMedia | None = None,
     ) -> None:
         self.config = sendspin
         self.audio = audio
@@ -144,6 +153,9 @@ class SendspinSourcePublisher:
             source: True for source in self._source_devices
         }
         self._pcm_stream_factories = pcm_stream_factories or {}
+        self._bluetooth_media = bluetooth_media
+        self._bluetooth_pause_latched = False
+        self._bluetooth_pause_observed = False
 
     async def set_distribution_enabled(self, enabled: bool) -> None:
         self._distribution_enabled = enabled
@@ -274,6 +286,24 @@ class SendspinSourcePublisher:
 
     async def _handle_server_command(self, command: str) -> None:
         await self.events.emit("sendspin_source_command", {"command": command})
+        if self._selected_source is Source.BLUETOOTH and self._bluetooth_media:
+            if command == "start":
+                self._bluetooth_pause_latched = False
+                self._bluetooth_pause_observed = False
+                transport_command = "play"
+            else:
+                # Latch before sending Pause so still-buffered PCM cannot
+                # immediately trigger line-sense auto-play again.
+                self._bluetooth_pause_latched = True
+                self._bluetooth_pause_observed = False
+                transport_command = "pause"
+            try:
+                await self._bluetooth_media.media_command(transport_command)
+            except Exception as exc:
+                await self.events.emit(
+                    "bluetooth_media_command_failed",
+                    {"command": transport_command, "error": str(exc)},
+                )
         if command == "start":
             await self._start_streaming()
         else:
@@ -492,6 +522,21 @@ class SendspinSourcePublisher:
             source_enabled = self._source_distribution_enabled.get(
                 selected or self._selected_source, True
             )
+            if self._bluetooth_pause_latched and selected is Source.BLUETOOTH:
+                media_status = (
+                    self._bluetooth_media.playback_status
+                    if self._bluetooth_media is not None
+                    else None
+                )
+                if media_status in {"paused", "stopped"}:
+                    self._bluetooth_pause_observed = True
+                elif self._bluetooth_pause_observed and media_status == "playing":
+                    # A new Play from the phone is intentional and may once
+                    # again drive MA's line-sense auto-play policy.
+                    self._bluetooth_pause_latched = False
+                    self._bluetooth_pause_observed = False
+                if self._bluetooth_pause_latched:
+                    detected = False
             if not self._distribution_enabled or not source_enabled:
                 active = False
                 absent_since = None
