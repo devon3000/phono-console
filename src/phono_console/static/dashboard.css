@@ -206,6 +206,10 @@ button:disabled { cursor: wait; opacity: .45; }
 .controls-panel p { font-size: 12px; line-height: 1.55; }
 .button-row { justify-content: flex-start; gap: 9px; margin-top: 23px; }
 .control-result { min-height: 38px; color: var(--amber); }
+.bluetooth-media { display: grid; gap: 7px; margin-top: 24px; padding-top: 20px; border-top: 1px solid #202723; }
+.bluetooth-media strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bluetooth-media .muted { min-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.media-row { margin-top: 7px; }
 
 .events-panel ol { max-height: 155px; margin: 14px 0 0; padding: 0; overflow: auto; list-style: none; }
 .events-panel li { display: grid; grid-template-columns: 60px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px solid #202723; color: #b9c2bd; font-size: 11px; }

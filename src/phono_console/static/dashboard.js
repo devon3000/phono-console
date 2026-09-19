@@ -188,6 +188,17 @@ function render(data) {
   renderConnections(data);
   renderEvents(data.events);
   const pairing = Boolean(data.bluetooth?.pairing);
+  const media = data.bluetooth || {};
+  const track = media.media_track || {};
+  const mediaAvailable = Boolean(media.media_available);
+  const mediaPlaying = media.media_status === "playing";
+  byId("bluetooth-track").textContent = track.title || (mediaAvailable ? "Unknown track" : "No connected player");
+  byId("bluetooth-artist").textContent = [track.artist, track.album].filter(Boolean).join(" · ") || (mediaAvailable ? media.media_status || "Ready" : "Connect a paired phone to begin");
+  byId("bluetooth-play-pause").textContent = mediaPlaying ? "PAUSE" : "PLAY";
+  byId("bluetooth-play-pause").dataset.command = mediaPlaying ? "pause" : "play";
+  for (const id of ["bluetooth-previous", "bluetooth-play-pause", "bluetooth-next"]) {
+    byId(id).disabled = !mediaAvailable;
+  }
   const localOnly = Boolean(data.local_playback_only);
   const phonoMode = data.phono_output_mode || "local";
   const stickyMinutes = Number(data.system?.phono_mode_sticky_minutes || 60);
@@ -228,6 +239,15 @@ async function setLocalOnly() {
 async function setPhonoOutput(mode) {
   try {
     await api("/v1/phono-output", {method: "PUT", body: JSON.stringify({mode})});
+    await poll();
+  } catch (error) {
+    byId("control-result").textContent = error.message;
+  }
+}
+
+async function bluetoothMedia(command) {
+  try {
+    await api("/v1/bluetooth/media", {method: "POST", body: JSON.stringify({command})});
     await poll();
   } catch (error) {
     byId("control-result").textContent = error.message;
@@ -277,6 +297,9 @@ byId("pairing-close").addEventListener("click", () => setPairing(false));
 byId("local-only").addEventListener("click", setLocalOnly);
 byId("phono-local").addEventListener("click", () => setPhonoOutput("local"));
 byId("phono-downstairs").addEventListener("click", () => setPhonoOutput("downstairs"));
+byId("bluetooth-previous").addEventListener("click", () => bluetoothMedia("previous"));
+byId("bluetooth-play-pause").addEventListener("click", (event) => bluetoothMedia(event.currentTarget.dataset.command || "play"));
+byId("bluetooth-next").addEventListener("click", () => bluetoothMedia("next"));
 
 poll();
 pollTimer = setInterval(poll, 250);

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from .config import BluetoothConfig
@@ -11,12 +12,79 @@ from .state import StateStore
 
 
 _LOGGER = logging.getLogger(__name__)
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+async def _run_bluetoothctl(*args: str) -> tuple[int, str, str]:
+    process = await asyncio.create_subprocess_exec(
+        "bluetoothctl",
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    return (
+        process.returncode or 0,
+        stdout.decode(errors="replace"),
+        stderr.decode(errors="replace"),
+    )
+
+
+def parse_player_show(output: str) -> dict[str, object]:
+    """Parse ``bluetoothctl player.show`` into dashboard-safe media state."""
+    values: dict[str, str] = {}
+    player_path: str | None = None
+    for raw_line in _ANSI_ESCAPE.sub("", output).splitlines():
+        line = raw_line.strip()
+        if line.startswith("Player "):
+            player_path = line.split()[1]
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        values[key.strip()] = value.strip()
+    if player_path is None:
+        return {"media_available": False}
+
+    def integer(key: str) -> int | None:
+        value = values.get(key)
+        if value is None:
+            return None
+        try:
+            return int(value, 0)
+        except ValueError:
+            return None
+
+    track = {
+        "title": values.get("Track.Title"),
+        "artist": values.get("Track.Artist"),
+        "album": values.get("Track.Album"),
+        "duration_ms": integer("Track.Duration"),
+        "track_number": integer("Track.TrackNumber"),
+        "number_of_tracks": integer("Track.NumberOfTracks"),
+    }
+    return {
+        "media_available": True,
+        "media_player_path": player_path,
+        "media_player_name": values.get("Name"),
+        "media_status": values.get("Status", "unknown").lower(),
+        "media_position_ms": integer("Position"),
+        "media_track": {key: value for key, value in track.items() if value is not None},
+    }
 
 
 class BluetoothManager:
     """Supervise one headless BlueZ agent and a time-limited pairing window."""
 
-    def __init__(self, config: BluetoothConfig, events: EventSink, state: StateStore):
+    def __init__(
+        self,
+        config: BluetoothConfig,
+        events: EventSink,
+        state: StateStore,
+        *,
+        command_runner: Callable[..., Awaitable[tuple[int, str, str]]] = _run_bluetoothctl,
+        media_poll_seconds: float = 1.0,
+    ):
         self.config = config
         self.events = events
         self.state = state
@@ -26,6 +94,69 @@ class BluetoothManager:
         self._pairing_active = False
         self._agent_ready = asyncio.Event()
         self._write_lock = asyncio.Lock()
+        self._command_runner = command_runner
+        self._media_poll_seconds = media_poll_seconds
+
+    @property
+    def playback_status(self) -> str | None:
+        value = self.state.bluetooth.get("media_status")
+        return str(value) if value is not None else None
+
+    async def media_command(self, command: str) -> None:
+        """Send an AVRCP transport command to the connected phone."""
+        if command not in {"play", "pause", "next", "previous"}:
+            raise ValueError("unsupported Bluetooth media command")
+        code, stdout, stderr = await self._command_runner(f"player.{command}")
+        if code != 0:
+            raise RuntimeError(
+                stderr.strip() or stdout.strip() or f"Bluetooth {command} failed"
+            )
+        await self.events.emit("bluetooth_media_command", {"command": command})
+        await self._refresh_media_state()
+
+    async def _refresh_media_state(self) -> None:
+        code, stdout, stderr = await self._command_runner("player.show")
+        media = (
+            parse_player_show(stdout)
+            if code == 0
+            else {"media_available": False, "media_error": stderr.strip()}
+        )
+        previous = {
+            key: value
+            for key, value in self.state.bluetooth.items()
+            if key.startswith("media_")
+        }
+        if media != previous:
+            updated = {
+                key: value
+                for key, value in self.state.bluetooth.items()
+                if not key.startswith("media_")
+            }
+            updated.update(media)
+            await self.state.set_bluetooth_state(updated)
+            if media.get("media_available"):
+                track = media.get("media_track")
+                await self.events.emit(
+                    "bluetooth_media_updated",
+                    {
+                        "status": media.get("media_status", "unknown"),
+                        **({"track": track} if track else {}),
+                    },
+                )
+
+    async def _watch_media(self, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            try:
+                await self._refresh_media_state()
+                await self.state.set_component(
+                    "bluetooth_media",
+                    "ok",
+                    self.playback_status or "no connected media player",
+                )
+            except Exception as exc:
+                await self.state.set_component("bluetooth_media", "degraded", str(exc))
+            with suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=self._media_poll_seconds)
 
     async def _send_command(self, *command: str) -> None:
         """Send a command through the process that owns the BlueZ agent."""
@@ -173,6 +304,9 @@ class BluetoothManager:
         if not self.config.enabled:
             await self._publish(enabled=False, agent=False, pairing=False)
             return
+        media_task = asyncio.create_task(
+            self._watch_media(stop), name="bluetooth-media-monitor"
+        )
         while not stop.is_set():
             try:
                 self._agent_ready.clear()
@@ -214,6 +348,9 @@ class BluetoothManager:
                 await self.events.emit("bluetooth_agent_failed", {"error": str(exc)})
             with suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=5)
+        media_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await media_task
         await self.close()
 
     async def _stop_agent(self) -> None:

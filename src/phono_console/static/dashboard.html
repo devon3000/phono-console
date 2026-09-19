@@ -128,6 +128,16 @@
           <button id="pairing-open" class="primary-button" type="button">PAIR PHONE</button>
           <button id="pairing-close" class="secondary-button" type="button">CLOSE PAIRING</button>
         </div>
+        <div class="bluetooth-media">
+          <span class="label">BLUETOOTH NOW PLAYING</span>
+          <strong id="bluetooth-track">No connected player</strong>
+          <span id="bluetooth-artist" class="muted">Connect a paired phone to begin</span>
+          <div class="button-row media-row" role="group" aria-label="Bluetooth playback controls">
+            <button id="bluetooth-previous" class="secondary-button" type="button" aria-label="Previous track">PREVIOUS</button>
+            <button id="bluetooth-play-pause" class="primary-button" type="button">PLAY</button>
+            <button id="bluetooth-next" class="secondary-button" type="button" aria-label="Next track">NEXT</button>
+          </div>
+        </div>
         <p id="control-result" class="control-result" aria-live="polite">Phono defaults to the lowest-latency console output.</p>
       </article>
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from phono_console.config import AudioConfig, SendspinConfig
 from phono_console.controller import Status
 from phono_console.audio_engine_protocol import AudioSource, FrameFlags, TimestampedPcm
-from phono_console.policy import Route
+from phono_console.policy import Route, Source
 from phono_console.sendspin_source import SendspinSourcePublisher
 from phono_console.simulation import SimulatedEventSink
 from phono_console.state import StateStore
@@ -96,6 +96,16 @@ class FakeClient:
             listener(FakeServerCommand(FakeSourceCommand(name)))
 
 
+class FakeBluetoothMedia:
+    def __init__(self) -> None:
+        self.playback_status: str | None = "playing"
+        self.commands: list[str] = []
+
+    async def media_command(self, command: str) -> None:
+        self.commands.append(command)
+        self.playback_status = "paused" if command == "pause" else "playing"
+
+
 async def endless_pcm():
     while True:
         yield b"\x00\x00" * 2 * 960
@@ -160,6 +170,30 @@ def test_server_commands_start_and_stop_the_capture_stream() -> None:
         assert "sendspin_source_connected" in names
         assert "sendspin_source_stream_started" in names
         assert "sendspin_source_stream_stopped" in names
+
+    asyncio.run(scenario())
+
+
+def test_bluetooth_source_commands_control_phone_and_latch_pause() -> None:
+    async def scenario() -> None:
+        media = FakeBluetoothMedia()
+        publisher = SendspinSourcePublisher(
+            SENDSPIN,
+            AUDIO,
+            SimulatedEventSink(),
+            StateStore(),
+            source_devices={Source.BLUETOOTH: "bluealsa"},
+            bluetooth_media=media,
+        )
+        publisher._selected_source = Source.BLUETOOTH
+
+        await publisher._handle_server_command("stop")
+        assert media.commands == ["pause"]
+        assert publisher._bluetooth_pause_latched is True
+
+        await publisher._handle_server_command("start")
+        assert media.commands == ["pause", "play"]
+        assert publisher._bluetooth_pause_latched is False
 
     asyncio.run(scenario())
 

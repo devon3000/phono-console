@@ -77,6 +77,9 @@ phono amplifier input, hardware monitor path, or physical input selector.
   playback through Music Assistant. It survives record changes, then returns
   to local after a configurable inactive interval (60 minutes by default).
 - Bluetooth is published through Sendspin to `Downstairs` automatically.
+- Music Assistant's Live Input play/stop commands are forwarded to the phone
+  over Bluetooth AVRCP. An intentional stop is latched until playback is
+  explicitly resumed, so line sensing cannot immediately restart the group.
 - If MA, Sendspin, or the network is unavailable, the selected phono/Bluetooth
   source falls back to the direct local output path.
 - Nothing is active: output silence.
@@ -149,6 +152,9 @@ initial endpoints are:
 - `POST /v1/levels/reset` — clears peak maxima and clipping latches
 - `PUT /v1/bluetooth/pairing` — opens or closes the time-limited pairing window
 - `POST /v1/bluetooth/device` — disconnects or forgets a paired device
+- `POST /v1/bluetooth/media` with
+  `{"command": "play"|"pause"|"next"|"previous"}` — controls the connected
+  phone's media player
 - `PUT /v1/phono-output` with `{"mode": "local"|"downstairs"}` — persistently
   selects minimum-latency console or synchronized Downstairs playback for phono
 - `PUT /v1/whole-house` with `{\"enabled\": true|false}` — starts or stops the
@@ -165,8 +171,10 @@ troubleshooting switch that forces both phono and Bluetooth to the console.
 Enter the generated API token once per browser tab to see the active route,
 stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
 Sendspin connectivity, component health/errors, configured devices, version,
-uptime, network identity, recent events, pairing, and distribution status. Local
-output is shown as an explicitly labeled unity-gain input
+uptime, network identity, recent events, pairing, and distribution status. The
+dashboard also shows Bluetooth track metadata and play/pause/previous/next
+controls when the connected phone exposes an AVRCP media player. Local output
+is shown as an explicitly labeled unity-gain input
 mirror; the standalone Sendspin player does not currently expose PCM telemetry,
 so MA output levels are marked unavailable rather than estimated.
 

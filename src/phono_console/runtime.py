@@ -122,6 +122,7 @@ async def run_daemon(config: Config) -> None:
         PhonoOutputMode.DOWNSTAIRS if marker_is_fresh else PhonoOutputMode.LOCAL
     )
     events = CompositeEventSink(LoggingEventSink(), state)
+    bluetooth_manager = BluetoothManager(config.bluetooth, events, state)
     launcher = SubprocessLauncher()
     timestamped_bluetooth = (
         TimestampedBluetoothBackend.create(config, events)
@@ -187,6 +188,9 @@ async def run_daemon(config: Config) -> None:
                 timestamped_bluetooth.pcm_stream_factories
                 if timestamped_bluetooth is not None
                 else None
+            ),
+            bluetooth_media=(
+                bluetooth_manager if config.bluetooth.enabled else None
             ),
         )
         await publisher.set_distribution_enabled(not state.local_playback_only)
@@ -354,8 +358,6 @@ async def run_daemon(config: Config) -> None:
             "console_player": config.music_assistant.console_player,
         }
     )
-    bluetooth_manager = BluetoothManager(config.bluetooth, events, state)
-
     def reset_level_history() -> None:
         monitor.session.reset()
         if bluetooth_monitor is not None:
@@ -438,6 +440,9 @@ async def run_daemon(config: Config) -> None:
         ),
         bluetooth_device_action=(
             bluetooth_manager.device_action if config.bluetooth.enabled else None
+        ),
+        bluetooth_media_action=(
+            bluetooth_manager.media_command if config.bluetooth.enabled else None
         ),
         local_only_action=local_only_action,
         phono_output_action=phono_output_action,

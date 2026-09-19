@@ -221,3 +221,29 @@ def test_api_controls_sticky_phono_output_mode() -> None:
             await client.close()
 
     asyncio.run(scenario())
+
+
+def test_api_controls_bluetooth_media() -> None:
+    async def scenario() -> None:
+        calls: list[str] = []
+
+        async def action(command: str) -> None:
+            calls.append(command)
+
+        api = ControlApi(StateStore(), None, bluetooth_media_action=action)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.post(
+                "/v1/bluetooth/media", json={"command": "next"}
+            )
+            assert response.status == 200
+            assert calls == ["next"]
+            rejected = await client.post(
+                "/v1/bluetooth/media", json={"command": "volume-up"}
+            )
+            assert rejected.status == 400
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
