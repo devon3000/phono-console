@@ -106,10 +106,8 @@ such as vocals sound hollow or phase-cancelled.
   Music Assistant's 1–100 range maps to Yamaha 15–45 by default, reducing CEC
   traffic and imposing a safe maximum; both endpoints are configurable under
   `[amplifier]`. Volume 0 mutes the Yamaha.
-  When playback wakes the Yamaha from standby, it also sets logical volume 50
-  (Yamaha 30 with the default mapping). Route changes while the amplifier is
-  already on preserve the current volume. The wake volume is configurable as
-  `startup_volume`.
+  Waking the Yamaha never resets its volume; Music Assistant remains the
+  authority for group-member levels and their relative balance.
   The Pi also announces itself as the active CEC source whenever playback
   begins from idle, selecting Yamaha HDMI1 in the installed wiring.
 

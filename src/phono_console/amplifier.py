@@ -99,14 +99,12 @@ class CecAmplifier:
             return
         async with self._lock:
             process = await self._open()
-            was_standby = False
             try:
                 await self._send(
                     process, f"tx 1{self.config.logical_address:x}:8f"
                 )
                 status = await self._read_match(process, _POWER_STATUS, timeout=2)
-                was_standby = status != 0
-                if was_standby:
+                if status != 0:
                     await self._send(process, f"on {self.config.logical_address}")
                 deadline = asyncio.get_running_loop().time() + 8
                 while status != 0 and asyncio.get_running_loop().time() < deadline:
@@ -130,8 +128,6 @@ class CecAmplifier:
                 )
             finally:
                 await self._close(process)
-        if was_standby and status == 0:
-            await self.set_volume(self.config.startup_volume)
 
     async def set_volume(self, target: int) -> tuple[int, bool]:
         if not self.config.enabled:
