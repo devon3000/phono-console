@@ -75,6 +75,43 @@ def test_controller_wakes_amplifier_on_first_active_route() -> None:
     asyncio.run(scenario())
 
 
+def test_controller_starts_hdmi_route_before_waking_amplifier() -> None:
+    async def scenario() -> None:
+        actions: list[str] = []
+
+        class OrderedRouter(SimulatedAudioRouter):
+            async def apply(self, route: Route) -> None:
+                await super().apply(route)
+                if route is not Route.IDLE:
+                    actions.append("audio")
+
+        async def wake() -> None:
+            actions.append("wake")
+
+        async def activate_route(_route: Route) -> None:
+            actions.append("volume")
+
+        level = SimulatedLevelMonitor()
+        subject = Controller(
+            config(),
+            level,
+            SimulatedMusicAssistant(),
+            OrderedRouter(),
+            SimulatedEventSink(),
+            activate_output=wake,
+            activate_route=activate_route,
+        )
+        await subject.tick(now=0)
+        actions.clear()
+        level.level = -20
+        await subject.tick(now=1)
+        await subject.tick(now=1.25)
+
+        assert actions == ["audio", "wake", "volume"]
+
+    asyncio.run(scenario())
+
+
 def test_controller_activates_local_phono_profile_on_route_entry() -> None:
     async def scenario() -> None:
         level = SimulatedLevelMonitor()

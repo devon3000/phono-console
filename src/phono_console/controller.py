@@ -339,20 +339,11 @@ class Controller:
                 self.route.value if self.route else "startup",
                 desired_route.value,
             )
-        if (
+        activating_output = (
             desired_route is not Route.IDLE
             and (self.route is None or self.route is Route.IDLE)
             and self.activate_output is not None
-        ):
-            try:
-                await self.activate_output()
-            except Exception as exc:
-                await self._set_component("amplifier", "degraded", str(exc))
-        if desired_route != self.route and self.activate_route is not None:
-            try:
-                await self.activate_route(desired_route)
-            except Exception as exc:
-                await self._set_component("amplifier", "degraded", str(exc))
+        )
         try:
             # Reconcile every tick so a child process that dies while the
             # desired route is unchanged is supervised and restarted.
@@ -362,6 +353,24 @@ class Controller:
             elif desired_route != self.route:
                 await self.audio_router.apply(desired_route)
             await self._set_router_component(desired_route)
+
+            # Keep HDMI PCM flowing before waking the SR-300. The receiver
+            # reliably locks onto audio when powered on with a live stream,
+            # while waking it before ALSA opens can leave HDMI silent until a
+            # second physical power cycle. Restore route-specific volume only
+            # after the receiver has completed its wake/settle sequence.
+            if activating_output:
+                try:
+                    assert self.activate_output is not None
+                    await self.activate_output()
+                except Exception as exc:
+                    await self._set_component("amplifier", "degraded", str(exc))
+            if desired_route != self.route and self.activate_route is not None:
+                try:
+                    await self.activate_route(desired_route)
+                except Exception as exc:
+                    await self._set_component("amplifier", "degraded", str(exc))
+
             if self._last_route_error is not None:
                 await self.event_sink.emit(
                     "route_apply_recovered", {"route": desired_route.value}

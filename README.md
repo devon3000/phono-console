@@ -107,6 +107,8 @@ such as vocals sound hollow or phase-cancelled.
   traffic and imposing a safe maximum; both endpoints are configurable under
   `[amplifier]`. Volume 0 mutes the Yamaha. `wake_settle_seconds` delays audio
   and volume commands after a CEC wake so the receiver can finish starting.
+  On a cold start, the HDMI PCM route is opened before the CEC wake so the
+  receiver sees a live audio stream throughout its HDMI initialization.
   Waking the Yamaha never resets its volume; Music Assistant remains the
   authority for group-member levels and their relative balance.
   Local phono has a separate persistent logical-volume profile (50 by default),
