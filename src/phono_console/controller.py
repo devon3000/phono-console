@@ -171,7 +171,7 @@ class Controller:
         bluetooth_level = -120.0
         bluetooth_active = False
         bluetooth_capture_ok = self.bluetooth_monitor is not None
-        if self.bluetooth_monitor is not None:
+        if self.bluetooth_monitor is not None and not phono_active:
             try:
                 bluetooth_level = await asyncio.wait_for(
                     self.bluetooth_monitor.level_dbfs(), timeout=2.0
@@ -190,6 +190,19 @@ class Controller:
                     "streaming" if bluetooth_active else "connected or idle",
                     level_dbfs=bluetooth_level,
                 )
+        elif phono_active:
+            # The timestamped Bluetooth monitor waits for a PCM frame. With no
+            # phone streaming that wait reaches its two-second timeout and used
+            # to stall phono metering even though phono has higher priority.
+            # Do not sample an irrelevant lower-priority source while a record
+            # is active; require Bluetooth to pass attack detection again when
+            # phono releases.
+            self.bluetooth_detector.reset_inactive()
+            await self._set_component(
+                "bluetooth_audio",
+                "ok",
+                "monitoring paused while phono is active",
+            )
         available = await self._distribution_ready(timestamp)
         selected_source = (
             Source.PHONO

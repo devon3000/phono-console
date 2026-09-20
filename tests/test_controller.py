@@ -115,6 +115,45 @@ def test_capture_loss_immediately_stops_an_active_local_route() -> None:
     asyncio.run(scenario())
 
 
+def test_active_phono_does_not_wait_for_idle_bluetooth_capture() -> None:
+    class CountingBluetoothMonitor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def level_dbfs(self) -> float:
+            self.calls += 1
+            return -120.0
+
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor()
+        phono.level = -20.0
+        bluetooth = CountingBluetoothMonitor()
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+        )
+
+        # Bluetooth is sampled while phono is still inside its attack window.
+        await subject.tick(now=0)
+        assert bluetooth.calls == 1
+
+        # Once phono owns the route, its meter cadence no longer depends on an
+        # idle Bluetooth source producing frames.
+        await subject.tick(now=0.25)
+        await subject.tick(now=0.50)
+        assert subject.route is Route.LOCAL_PHONO
+        assert bluetooth.calls == 1
+
+    asyncio.run(scenario())
+
+
 def test_requested_distribution_is_prepared_immediately() -> None:
     async def scenario() -> None:
         level = SimulatedLevelMonitor()
