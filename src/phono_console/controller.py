@@ -56,6 +56,7 @@ class Controller:
         expire_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
         refresh_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
         activate_output: Callable[[], Awaitable[None]] | None = None,
+        activate_route: Callable[[Route], Awaitable[None]] | None = None,
     ) -> None:
         self.config = config
         self.level_monitor = level_monitor
@@ -72,6 +73,7 @@ class Controller:
         self.expire_phono_output_mode = expire_phono_output_mode
         self.refresh_phono_output_mode = refresh_phono_output_mode
         self.activate_output = activate_output
+        self.activate_route = activate_route
         self._phono_mode_inactive_since: float | None = None
         self._phono_mode_last_refresh: float | None = None
         self.detector = ActivityDetector(
@@ -344,6 +346,11 @@ class Controller:
         ):
             try:
                 await self.activate_output()
+            except Exception as exc:
+                await self._set_component("amplifier", "degraded", str(exc))
+        if desired_route != self.route and self.activate_route is not None:
+            try:
+                await self.activate_route(desired_route)
             except Exception as exc:
                 await self._set_component("amplifier", "degraded", str(exc))
         try:

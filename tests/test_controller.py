@@ -75,6 +75,32 @@ def test_controller_wakes_amplifier_on_first_active_route() -> None:
     asyncio.run(scenario())
 
 
+def test_controller_activates_local_phono_profile_on_route_entry() -> None:
+    async def scenario() -> None:
+        level = SimulatedLevelMonitor()
+        activated: list[Route] = []
+
+        async def activate(route: Route) -> None:
+            activated.append(route)
+
+        subject = Controller(
+            config(),
+            level,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            activate_route=activate,
+        )
+        await subject.tick(now=0)
+        level.level = -20
+        await subject.tick(now=1)
+        await subject.tick(now=1.25)
+
+        assert Route.LOCAL_PHONO in activated
+
+    asyncio.run(scenario())
+
+
 def test_controller_capture_failure_fails_silent_and_recovers() -> None:
     class FlakyMonitor:
         calls = 0

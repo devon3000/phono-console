@@ -272,10 +272,10 @@ def test_api_controls_bluetooth_media() -> None:
 
 def test_api_controls_cec_amplifier_volume() -> None:
     async def scenario() -> None:
-        calls: list[int] = []
+        calls: list[tuple[int, str]] = []
 
-        async def action(volume: int) -> tuple[int, bool]:
-            calls.append(volume)
+        async def action(volume: int, source: str) -> tuple[int, bool]:
+            calls.append((volume, source))
             return volume, False
 
         api = ControlApi(StateStore(), None, amplifier_volume_action=action)
@@ -287,7 +287,14 @@ def test_api_controls_cec_amplifier_volume() -> None:
             )
             assert response.status == 200
             assert await response.json() == {"volume": 28, "muted": False}
-            assert calls == [28]
+            assert calls == [(28, "direct")]
+            response = await client.put(
+                "/v1/amplifier/volume",
+                json={"volume": 42},
+                headers={"X-Phono-Volume-Source": "music_assistant"},
+            )
+            assert response.status == 200
+            assert calls[-1] == (42, "music_assistant")
         finally:
             await client.close()
 

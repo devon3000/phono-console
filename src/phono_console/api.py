@@ -15,7 +15,7 @@ LevelResetAction = Callable[[], None]
 PairingAction = Callable[[], Awaitable[None]]
 BluetoothDeviceAction = Callable[[str, str], Awaitable[None]]
 BluetoothMediaAction = Callable[[str], Awaitable[None]]
-AmplifierVolumeAction = Callable[[int], Awaitable[tuple[int, bool]]]
+AmplifierVolumeAction = Callable[[int, str], Awaitable[tuple[int, bool]]]
 LocalOnlyAction = Callable[[bool], Awaitable[None]]
 PhonoOutputAction = Callable[[PhonoOutputMode], Awaitable[None]]
 PUBLIC_PATHS = frozenset(("/", "/assets/dashboard.css", "/assets/dashboard.js"))
@@ -164,7 +164,8 @@ class ControlApi:
         volume = body.get("volume")
         if not isinstance(volume, int) or not 0 <= volume <= 100:
             raise web.HTTPBadRequest(text="volume must be an integer from 0 to 100")
-        actual, muted = await self.amplifier_volume_action(volume)
+        source = request.headers.get("X-Phono-Volume-Source", "direct")
+        actual, muted = await self.amplifier_volume_action(volume, source)
         return web.json_response({"volume": actual, "muted": muted})
 
     async def set_local_only(self, request: web.Request) -> web.Response:

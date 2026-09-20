@@ -6,6 +6,7 @@ import os
 import signal
 import socket
 import time
+from contextlib import suppress
 from pathlib import Path
 from importlib.metadata import PackageNotFoundError, version
 
@@ -111,6 +112,13 @@ async def run_daemon(config: Config) -> None:
     state = StateStore()
     local_only_marker = Path(config.sendspin.state_dir) / "local-playback-only"
     phono_downstairs_marker = Path(config.sendspin.state_dir) / "phono-downstairs"
+    local_phono_volume_path = Path(config.sendspin.state_dir) / "local-phono-volume"
+    local_phono_volume = config.amplifier.local_phono_volume
+    if local_phono_volume_path.exists():
+        with suppress(ValueError):
+            local_phono_volume = max(
+                0, min(100, int(local_phono_volume_path.read_text().strip()))
+            )
     await state.set_local_playback_only(local_only_marker.exists())
     sticky_seconds = config.routing.phono_mode_sticky_minutes * 60
     marker_is_fresh = (
@@ -183,6 +191,25 @@ async def run_daemon(config: Config) -> None:
             await amplifier.set_volume(volume)
 
     bluetooth_manager.set_volume_action(bluetooth_volume_action)
+
+    async def activate_route(route: Route) -> None:
+        if route is Route.LOCAL_PHONO:
+            await amplifier.set_volume(local_phono_volume)
+
+    async def amplifier_volume_action(
+        volume: int, source: str
+    ) -> tuple[int, bool]:
+        nonlocal local_phono_volume
+        result = await amplifier.set_volume(volume)
+        route = state.status.route if state.status is not None else Route.IDLE
+        if source != "music_assistant" and route is Route.LOCAL_PHONO:
+            local_phono_volume = volume
+            local_phono_volume_path.parent.mkdir(parents=True, exist_ok=True)
+            local_phono_volume_path.write_text(f"{volume}\n")
+            await events.emit(
+                "local_phono_volume_saved", {"volume": volume, "source": source}
+            )
+        return result
     publisher: SendspinSourcePublisher | None = None
     whole_house_action = None
     if config.sendspin.source_enabled:
@@ -356,6 +383,7 @@ async def run_daemon(config: Config) -> None:
         expire_phono_output_mode=expire_phono_output_mode,
         refresh_phono_output_mode=refresh_phono_output_mode,
         activate_output=amplifier.power_on,
+        activate_route=activate_route,
     )
 
     api_token = os.getenv(config.runtime.api_token_env) or None
@@ -487,7 +515,7 @@ async def run_daemon(config: Config) -> None:
             bluetooth_manager.media_command if config.bluetooth.enabled else None
         ),
         amplifier_volume_action=(
-            amplifier.set_volume if config.amplifier.enabled else None
+            amplifier_volume_action if config.amplifier.enabled else None
         ),
         local_only_action=local_only_action,
         phono_output_action=phono_output_action,

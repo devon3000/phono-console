@@ -50,6 +50,8 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "snd-aloop" in installer
     assert "cec-utils" in installer
     assert "cec-volume-hook" in installer
+    hook = (ROOT / "scripts" / "cec-volume-hook.sh").read_text()
+    assert "X-Phono-Volume-Source: music_assistant" in hook
     assert "--groups audio,bluetooth,video" in installer
     assert "-G audio,bluetooth,video" in installer
     assert '[amplifier]' in installer

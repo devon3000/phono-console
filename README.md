@@ -108,6 +108,9 @@ such as vocals sound hollow or phase-cancelled.
   `[amplifier]`. Volume 0 mutes the Yamaha.
   Waking the Yamaha never resets its volume; Music Assistant remains the
   authority for group-member levels and their relative balance.
+  Local phono has a separate persistent logical-volume profile (50 by default),
+  restored whenever direct record playback begins. Direct controls used during
+  local phono update that profile; MA volume-hook calls never overwrite it.
   The Pi also announces itself as the active CEC source whenever playback
   begins from idle, selecting Yamaha HDMI1 in the installed wiring.
 
