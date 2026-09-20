@@ -141,6 +141,10 @@ class SendspinSourcePublisher:
         self._stream_task: asyncio.Task[None] | None = None
         self._streaming = False
         self._stream_lock = asyncio.Lock()
+        # Server commands may arrive back-to-back while Music Assistant
+        # rebuilds a group. Preserve their wire order so cleanup for an older
+        # stop cannot race a newer start and invalidate its capture session.
+        self._command_lock = asyncio.Lock()
         self._stream_requested = False
         self._stream_retry_task: asyncio.Task[None] | None = None
         self._stream_error: str | None = None
@@ -285,29 +289,30 @@ class SendspinSourcePublisher:
             loop.create_task(self._handle_server_command("stop"))
 
     async def _handle_server_command(self, command: str) -> None:
-        await self.events.emit("sendspin_source_command", {"command": command})
-        if self._selected_source is Source.BLUETOOTH and self._bluetooth_media:
+        async with self._command_lock:
+            await self.events.emit("sendspin_source_command", {"command": command})
+            if self._selected_source is Source.BLUETOOTH and self._bluetooth_media:
+                if command == "start":
+                    self._bluetooth_pause_latched = False
+                    self._bluetooth_pause_observed = False
+                    transport_command = "play"
+                else:
+                    # Latch before sending Pause so still-buffered PCM cannot
+                    # immediately trigger line-sense auto-play again.
+                    self._bluetooth_pause_latched = True
+                    self._bluetooth_pause_observed = False
+                    transport_command = "pause"
+                try:
+                    await self._bluetooth_media.media_command(transport_command)
+                except Exception as exc:
+                    await self.events.emit(
+                        "bluetooth_media_command_failed",
+                        {"command": transport_command, "error": str(exc)},
+                    )
             if command == "start":
-                self._bluetooth_pause_latched = False
-                self._bluetooth_pause_observed = False
-                transport_command = "play"
+                await self._start_streaming()
             else:
-                # Latch before sending Pause so still-buffered PCM cannot
-                # immediately trigger line-sense auto-play again.
-                self._bluetooth_pause_latched = True
-                self._bluetooth_pause_observed = False
-                transport_command = "pause"
-            try:
-                await self._bluetooth_media.media_command(transport_command)
-            except Exception as exc:
-                await self.events.emit(
-                    "bluetooth_media_command_failed",
-                    {"command": transport_command, "error": str(exc)},
-                )
-        if command == "start":
-            await self._start_streaming()
-        else:
-            await self._stop_streaming()
+                await self._stop_streaming()
 
     async def _start_streaming(self) -> None:
         self._stream_requested = True

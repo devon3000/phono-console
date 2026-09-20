@@ -263,7 +263,15 @@ class Controller:
         inputs = Inputs(
             phono_active, bluetooth_active, ma_playing, available, output_mode
         )
-        desired_route = Route.IDLE if distribution_pending else choose_route(inputs)
+        # Keep direct phono playback alive while MA starts and buffers its
+        # return feed. Once distribution becomes available, the router swaps
+        # the exclusive physical output from direct capture to MA playback.
+        # Bluetooth retains its existing fail-silent startup behavior.
+        desired_route = (
+            Route.LOCAL_PHONO
+            if distribution_pending and selected_source is Source.PHONO
+            else (Route.IDLE if distribution_pending else choose_route(inputs))
+        )
         # Once Music Assistant has requested a source stream, its source.stop
         # command is the authority for ending that distributed session.  The
         # local level detector can briefly read silence while ALSA consumers
@@ -303,9 +311,6 @@ class Controller:
             and desired_route != self.route
             and self.prepare_distribution is not None
         ):
-            # Release the direct hardware endpoint before asking MA/Sendspin
-            # to start the synchronized return path.
-            await self.audio_router.apply(Route.IDLE)
             try:
                 prepared = await self.prepare_distribution(route_source(desired_route))
             except Exception as exc:

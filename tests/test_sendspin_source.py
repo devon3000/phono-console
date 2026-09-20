@@ -174,6 +174,51 @@ def test_server_commands_start_and_stop_the_capture_stream() -> None:
     asyncio.run(scenario())
 
 
+def test_rapid_stop_start_commands_do_not_overlap_capture_cleanup() -> None:
+    class BlockingStopCapture(FakeCapture):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stop_entered = asyncio.Event()
+            self.allow_stop = asyncio.Event()
+
+        async def stop(self) -> None:
+            self.stop_entered.set()
+            await self.allow_stop.wait()
+            await super().stop()
+
+    class BlockingStopClient(FakeClient):
+        def create_source_capture(self, audio_format) -> FakeCapture:
+            capture = (
+                BlockingStopCapture() if not self.captures else FakeCapture()
+            )
+            self.captures.append(capture)
+            return capture
+
+    async def scenario() -> None:
+        client = BlockingStopClient()
+        publisher, _, state = make_publisher(client)
+        publisher._client = client
+        publisher._connected = True
+        await publisher._handle_server_command("start")
+        first = client.captures[0]
+        assert isinstance(first, BlockingStopCapture)
+
+        stopping = asyncio.create_task(publisher._handle_server_command("stop"))
+        await first.stop_entered.wait()
+        starting = asyncio.create_task(publisher._handle_server_command("start"))
+        await asyncio.sleep(0)
+        assert len(client.captures) == 1
+
+        first.allow_stop.set()
+        await stopping
+        await starting
+        assert len(client.captures) == 2
+        assert state.sendspin_source["streaming"] is True
+        await publisher._stop_streaming()
+
+    asyncio.run(scenario())
+
+
 def test_bluetooth_source_commands_control_phone_and_latch_pause() -> None:
     async def scenario() -> None:
         media = FakeBluetoothMedia()

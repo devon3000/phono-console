@@ -332,7 +332,7 @@ def test_timestamped_distribution_falls_back_locally_after_timeout() -> None:
     asyncio.run(scenario())
 
 
-def test_requested_phono_distribution_never_falls_back_under_remote_audio() -> None:
+def test_requested_phono_distribution_keeps_local_audio_until_ma_is_ready() -> None:
     async def scenario() -> None:
         phono = SimulatedLevelMonitor()
         phono.level = -20.0
@@ -356,13 +356,13 @@ def test_requested_phono_distribution_never_falls_back_under_remote_audio() -> N
         )
         await subject.tick(now=0)
         await subject.tick(now=0.25)
-        assert subject.route is Route.IDLE
+        assert subject.route is Route.LOCAL_PHONO
         assert prepares == ["phono"]
 
-        # After the normal fallback timeout, explicit Downstairs mode remains
-        # muted and retries instead of mixing direct and delayed playback.
+        # Explicit Downstairs mode keeps uninterrupted direct playback and
+        # retries until the synchronized return feed is confirmed.
         await subject.tick(now=5.3)
-        assert subject.route is Route.IDLE
+        assert subject.route is Route.LOCAL_PHONO
         assert prepares == ["phono", "phono"]
 
     asyncio.run(scenario())

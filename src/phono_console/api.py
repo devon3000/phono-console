@@ -180,8 +180,8 @@ class ControlApi:
             ) from exc
         previous_mode = self.state.phono_output_mode
         # Publish the requested mode before the remote handoff begins. The
-        # controller can then silence the direct path while MA connects rather
-        # than continuing local playback underneath a delayed network stream.
+        # controller keeps direct phono playback active until MA confirms the
+        # buffered return feed, then swaps the console output to that feed.
         await self.state.set_phono_output_mode(mode)
         if self.phono_output_action is not None:
             try:
