@@ -196,10 +196,24 @@ class Controller:
             if phono_active
             else (Source.BLUETOOTH if bluetooth_active else Source.NONE)
         )
+        distribution_required = bool(
+            selected_source is Source.PHONO
+            and output_mode is PhonoOutputMode.DOWNSTAIRS
+        )
         distribution_pending = False
         capable = await self._distribution_is_capable(selected_source)
         if selected_source is not Source.NONE and not available and capable:
-            if self._distribution_pending_source is not selected_source:
+            should_prepare = self._distribution_pending_source is not selected_source
+            if (
+                distribution_required
+                and self._distribution_pending_since is not None
+                and (
+                    timestamp - self._distribution_pending_since
+                    >= self.config.routing.distribution_start_timeout_ms / 1000
+                )
+            ):
+                should_prepare = True
+            if should_prepare:
                 self._distribution_pending_source = selected_source
                 self._distribution_pending_since = timestamp
                 try:
@@ -216,10 +230,19 @@ class Controller:
                 elapsed_ms = (
                     timestamp - self._distribution_pending_since
                 ) * 1000
-                distribution_pending = (
-                    elapsed_ms
-                    < self.config.routing.distribution_start_timeout_ms
+                distribution_pending = distribution_required or (
+                    elapsed_ms < self.config.routing.distribution_start_timeout_ms
                 )
+        elif distribution_required and not available:
+            # Downstairs is an explicit user choice. Silence is safer than
+            # resuming the direct path while an unconfirmed remote stream may
+            # already be audible with network delay.
+            distribution_pending = True
+            await self._set_component(
+                "distribution",
+                "degraded",
+                "Downstairs unavailable; direct phono output is muted",
+            )
         elif available or selected_source is Source.NONE:
             self._distribution_pending_source = None
             self._distribution_pending_since = None

@@ -178,14 +178,20 @@ class ControlApi:
             raise web.HTTPBadRequest(
                 text="mode must be local or downstairs"
             ) from exc
+        previous_mode = self.state.phono_output_mode
+        # Publish the requested mode before the remote handoff begins. The
+        # controller can then silence the direct path while MA connects rather
+        # than continuing local playback underneath a delayed network stream.
+        await self.state.set_phono_output_mode(mode)
         if self.phono_output_action is not None:
             try:
                 await self.phono_output_action(mode)
             except WholeHouseError as exc:
+                await self.state.set_phono_output_mode(previous_mode)
                 raise web.HTTPConflict(text=str(exc)) from exc
             except Exception as exc:
+                await self.state.set_phono_output_mode(previous_mode)
                 raise web.HTTPServiceUnavailable(text=str(exc)) from exc
-        await self.state.set_phono_output_mode(mode)
         await self.state.emit(
             "phono_output_mode_changed", {"mode": mode.value, "source": "api"}
         )

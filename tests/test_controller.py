@@ -293,6 +293,42 @@ def test_timestamped_distribution_falls_back_locally_after_timeout() -> None:
     asyncio.run(scenario())
 
 
+def test_requested_phono_distribution_never_falls_back_under_remote_audio() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor()
+        phono.level = -20.0
+        router = SimulatedAudioRouter()
+        prepares: list[str] = []
+
+        async def prepare(source):
+            prepares.append(source.value)
+            return False
+
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            router,
+            SimulatedEventSink(),
+            distribution_available=lambda: False,
+            distribution_capable=lambda _source: True,
+            prepare_distribution=prepare,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.IDLE
+        assert prepares == ["phono"]
+
+        # After the normal fallback timeout, explicit Downstairs mode remains
+        # muted and retries instead of mixing direct and delayed playback.
+        await subject.tick(now=5.3)
+        assert subject.route is Route.IDLE
+        assert prepares == ["phono", "phono"]
+
+    asyncio.run(scenario())
+
+
 def test_selected_bluetooth_source_drives_dashboard_input_levels() -> None:
     class MeterMonitor:
         def __init__(self, dbfs: float) -> None:

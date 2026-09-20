@@ -80,8 +80,10 @@ phono amplifier input, hardware monitor path, or physical input selector.
 - Music Assistant's Live Input play/stop commands are forwarded to the phone
   over Bluetooth AVRCP. An intentional stop is latched until playback is
   explicitly resumed, so line sensing cannot immediately restart the group.
-- If MA, Sendspin, or the network is unavailable, the selected phono/Bluetooth
-  source falls back to the direct local output path.
+- If MA, Sendspin, or the network is unavailable, Bluetooth falls back to the
+  direct local output path. Phono does too in Console mode; when Downstairs was
+  explicitly selected, direct phono stays muted until synchronization succeeds
+  or the user switches back to Console, preventing delayed double playback.
 - Nothing is active: output silence.
 
 Priority is phono, then actively streaming Bluetooth, then Music Assistant.
@@ -168,6 +170,9 @@ The same service hosts a responsive dashboard at `http://PHONO_CONSOLE_IP:8765/`
 Its phono output control keeps **Synchronized Downstairs** across record changes
 and returns to **Console** after the configured inactive interval. **Local only** remains a separate global
 troubleshooting switch that forces both phono and Bluetooth to the console.
+During a live handoff, the dashboard reports **Connecting Downstairs** until the
+actual synchronized route is active; the selected preference is not presented
+as successful playback.
 Enter the generated API token once per browser tab to see the active route,
 stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
 Sendspin connectivity, component health/errors, configured devices, version,
