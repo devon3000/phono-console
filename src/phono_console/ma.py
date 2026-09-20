@@ -226,6 +226,19 @@ class MusicAssistantState:
             stopped.append(player.player_id)
         return stopped
 
+    async def set_group_volume(self, player_name: str, volume: int) -> bool:
+        """Set a named MA player/group to an absolute logical volume."""
+        await self._ensure_connected()
+        assert self._client is not None
+        player = self._find_named_player(player_name)
+        if player is None:
+            await self.events.emit("ma_player_missing", {"player": player_name})
+            return False
+        await self._client.players.group_volume(
+            player.player_id, max(0, min(100, int(volume)))
+        )
+        return True
+
     async def whole_house_is_requested(self) -> bool:
         if self.state is not None:
             return self.state.whole_house_requested

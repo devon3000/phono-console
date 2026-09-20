@@ -47,6 +47,7 @@ logical_address = 5
 wake_on_audio = true
 volume_min = 15
 volume_max = 45
+startup_volume = 50
 
 [music_assistant]
 base_url = "http://music-assistant.local"

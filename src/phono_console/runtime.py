@@ -170,6 +170,19 @@ async def run_daemon(config: Config) -> None:
         events,
         state,
     )
+
+    async def bluetooth_volume_action(volume: int) -> None:
+        route = state.status.route if state.status is not None else Route.IDLE
+        if route is Route.DISTRIBUTED_BLUETOOTH:
+            changed = await music_assistant.set_group_volume(
+                config.routing.distribution_target, volume
+            )
+            if not changed:
+                await amplifier.set_volume(volume)
+        elif route is Route.LOCAL_BLUETOOTH:
+            await amplifier.set_volume(volume)
+
+    bluetooth_manager.set_volume_action(bluetooth_volume_action)
     publisher: SendspinSourcePublisher | None = None
     whole_house_action = None
     if config.sendspin.source_enabled:

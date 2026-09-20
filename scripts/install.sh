@@ -359,6 +359,7 @@ logical_address = 5
 wake_on_audio = true
 volume_min = 15
 volume_max = 45
+startup_volume = 50
 EOF
 fi
 
@@ -436,6 +437,7 @@ logical_address = 5
 wake_on_audio = true
 volume_min = 15
 volume_max = 45
+startup_volume = 50
 EOF
 fi
 if [[ -n "$requested_audio_backend" ]]; then

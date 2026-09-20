@@ -89,6 +89,7 @@ class AmplifierConfig:
     wake_on_audio: bool = True
     volume_min: int = 15
     volume_max: int = 45
+    startup_volume: int = 50
 
 
 @dataclass(frozen=True)
@@ -225,6 +226,7 @@ def load_config(path: Path) -> Config:
             wake_on_audio=bool(amplifier.get("wake_on_audio", True)),
             volume_min=int(amplifier.get("volume_min", 15)),
             volume_max=int(amplifier.get("volume_max", 45)),
+            startup_volume=int(amplifier.get("startup_volume", 50)),
         ),
     )
     _validate(config)
@@ -284,3 +286,5 @@ def _validate(config: Config) -> None:
         raise ValueError(
             "amplifier volume range must satisfy 0 <= volume_min < volume_max <= 100"
         )
+    if not 0 <= config.amplifier.startup_volume <= 100:
+        raise ValueError("amplifier.startup_volume must be between 0 and 100")

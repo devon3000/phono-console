@@ -1,6 +1,11 @@
 import asyncio
 
-from phono_console.bluetooth import BluetoothManager, parse_player_show
+from phono_console.bluetooth import (
+    BluetoothManager,
+    parse_player_show,
+    parse_transport_paths,
+    parse_transport_volume,
+)
 from phono_console.config import BluetoothConfig
 from phono_console.simulation import SimulatedEventSink
 from phono_console.state import StateStore
@@ -45,6 +50,50 @@ def test_parse_player_show_extracts_transport_and_track_metadata() -> None:
         "album": "Kind of Blue",
         "duration_ms": 545000,
     }
+
+
+def test_parse_active_a2dp_sink_transport_volume() -> None:
+    listing = "Transport /org/bluez/hci0/dev_AA_BB/fd0\n"
+    details = """Transport /org/bluez/hci0/dev_AA_BB/fd0
+        UUID: Audio Sink (0000110b-0000-1000-8000-00805f9b34fb)
+        State: active
+        Volume: 0x0040 (64)
+    """
+    assert parse_transport_paths(listing) == ["/org/bluez/hci0/dev_AA_BB/fd0"]
+    assert parse_transport_volume(details) == 64
+    assert parse_transport_volume(details.replace("active", "idle")) is None
+
+
+def test_transport_volume_changes_drive_shared_logical_volume() -> None:
+    async def scenario() -> None:
+        calls: list[int] = []
+
+        async def command_runner(*args: str) -> tuple[int, str, str]:
+            if args == ("transport.list",):
+                return 0, "Transport /transport/0\n", ""
+            if args == ("transport.show", "/transport/0"):
+                return 0, "UUID: Audio Sink\nState: active\nVolume: 0x0040 (64)\n", ""
+            return 1, "", "missing"
+
+        async def volume_action(volume: int) -> None:
+            calls.append(volume)
+
+        state = StateStore()
+        manager = BluetoothManager(
+            BluetoothConfig(),
+            SimulatedEventSink(),
+            state,
+            command_runner=command_runner,
+            volume_action=volume_action,
+        )
+        await manager._refresh_transport_volume()
+        await manager._refresh_transport_volume()
+
+        assert calls == [50]
+        assert state.bluetooth["bluetooth_volume"] == 50
+        assert state.bluetooth["bluetooth_volume_raw"] == 64
+
+    asyncio.run(scenario())
 
 
 def test_media_command_uses_bluetoothctl_player_transport() -> None:

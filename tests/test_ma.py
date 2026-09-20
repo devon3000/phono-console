@@ -18,9 +18,13 @@ class FakePlayer:
 class FakePlayers:
     def __init__(self, players):
         self.players = players
+        self.group_volume_calls: list[tuple[str, int]] = []
 
     def __iter__(self):
         return iter(self.players)
+
+    async def group_volume(self, player_id: str, volume: int) -> None:
+        self.group_volume_calls.append((player_id, volume))
 
 
 class FakePlayerQueues:
@@ -69,6 +73,20 @@ def test_play_vinyl_source_targets_named_players() -> None:
         stopped = await state.stop_players(["console-id"])
         assert stopped == ["console-id"]
         assert client.player_queues.stop_calls == ["console-id"]
+
+    asyncio.run(scenario())
+
+
+def test_named_group_volume_is_clamped_and_sent() -> None:
+    async def scenario() -> None:
+        state = MusicAssistantState("http://ma", None, "Phono Console", SimulatedEventSink())
+        client = FakeClient()
+        state._client = client  # type: ignore[assignment]
+        state._ensure_connected = _noop  # type: ignore[method-assign]
+
+        assert await state.set_group_volume("Phono Console", 120)
+        assert client.players.group_volume_calls == [("console-id", 100)]
+        assert not await state.set_group_volume("Missing", 50)
 
     asyncio.run(scenario())
 

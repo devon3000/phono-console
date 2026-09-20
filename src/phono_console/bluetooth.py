@@ -73,6 +73,35 @@ def parse_player_show(output: str) -> dict[str, object]:
     }
 
 
+def parse_transport_paths(output: str) -> list[str]:
+    """Extract BlueZ MediaTransport object paths from bluetoothctl output."""
+    paths: list[str] = []
+    for raw_line in _ANSI_ESCAPE.sub("", output).splitlines():
+        parts = raw_line.strip().split()
+        if len(parts) >= 2 and parts[0] == "Transport" and parts[1].startswith("/"):
+            paths.append(parts[1])
+    return paths
+
+
+def parse_transport_volume(output: str) -> int | None:
+    """Return an active A2DP sink transport's AVRCP volume (0-127)."""
+    values: dict[str, str] = {}
+    for raw_line in _ANSI_ESCAPE.sub("", output).splitlines():
+        line = raw_line.strip()
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        values[key.strip()] = value.strip()
+    if values.get("State", "").lower() != "active":
+        return None
+    if "Audio Sink" not in values.get("UUID", ""):
+        return None
+    match = re.search(r"(?:0x[0-9a-fA-F]+|\d+)", values.get("Volume", ""))
+    if match is None:
+        return None
+    return max(0, min(127, int(match.group(0), 0)))
+
+
 class BluetoothManager:
     """Supervise one headless BlueZ agent and a time-limited pairing window."""
 
@@ -84,6 +113,7 @@ class BluetoothManager:
         *,
         command_runner: Callable[..., Awaitable[tuple[int, str, str]]] = _run_bluetoothctl,
         media_poll_seconds: float = 1.0,
+        volume_action: Callable[[int], Awaitable[None]] | None = None,
     ):
         self.config = config
         self.events = events
@@ -96,6 +126,13 @@ class BluetoothManager:
         self._write_lock = asyncio.Lock()
         self._command_runner = command_runner
         self._media_poll_seconds = media_poll_seconds
+        self._volume_action = volume_action
+        self._last_transport_volume: int | None = None
+
+    def set_volume_action(
+        self, action: Callable[[int], Awaitable[None]] | None
+    ) -> None:
+        self._volume_action = action
 
     @property
     def playback_status(self) -> str | None:
@@ -144,10 +181,35 @@ class BluetoothManager:
                     },
                 )
 
+    async def _refresh_transport_volume(self) -> None:
+        code, stdout, _ = await self._command_runner("transport.list")
+        if code != 0:
+            return
+        raw_volume: int | None = None
+        for path in parse_transport_paths(stdout):
+            show_code, show_stdout, _ = await self._command_runner(
+                "transport.show", path
+            )
+            if show_code == 0:
+                raw_volume = parse_transport_volume(show_stdout)
+            if raw_volume is not None:
+                break
+        if raw_volume is None or raw_volume == self._last_transport_volume:
+            return
+        self._last_transport_volume = raw_volume
+        volume = round(raw_volume * 100 / 127)
+        await self._publish(bluetooth_volume=volume, bluetooth_volume_raw=raw_volume)
+        await self.events.emit(
+            "bluetooth_volume_changed", {"volume": volume, "raw_volume": raw_volume}
+        )
+        if self._volume_action is not None:
+            await self._volume_action(volume)
+
     async def _watch_media(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
             try:
                 await self._refresh_media_state()
+                await self._refresh_transport_volume()
                 await self.state.set_component(
                     "bluetooth_media",
                     "ok",

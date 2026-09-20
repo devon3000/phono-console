@@ -99,9 +99,15 @@ class CecAmplifier:
             return
         async with self._lock:
             process = await self._open()
+            was_standby = False
             try:
-                await self._send(process, f"on {self.config.logical_address}")
-                status = 1
+                await self._send(
+                    process, f"tx 1{self.config.logical_address:x}:8f"
+                )
+                status = await self._read_match(process, _POWER_STATUS, timeout=2)
+                was_standby = status != 0
+                if was_standby:
+                    await self._send(process, f"on {self.config.logical_address}")
                 deadline = asyncio.get_running_loop().time() + 8
                 while status != 0 and asyncio.get_running_loop().time() < deadline:
                     await self._send(
@@ -112,12 +118,20 @@ class CecAmplifier:
                     )
                     if status != 0:
                         await asyncio.sleep(0.25)
+                # Advertise the Pi's detected physical address as active. With
+                # the Pi connected to Yamaha HDMI1 this selects HDMI1 without
+                # baking the topology's 1.0.0.0 address into configuration.
+                await self._send(process, "as")
+                await asyncio.sleep(0.25)
                 await self._publish(powered=status == 0)
                 await self.events.emit(
-                    "amplifier_power_on", {"power_status": status}
+                    "amplifier_power_on",
+                    {"power_status": status, "active_source": True},
                 )
             finally:
                 await self._close(process)
+        if was_standby and status == 0:
+            await self.set_volume(self.config.startup_volume)
 
     async def set_volume(self, target: int) -> tuple[int, bool]:
         if not self.config.enabled:
