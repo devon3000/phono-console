@@ -173,6 +173,16 @@ async def run_daemon(config: Config) -> None:
     publisher: SendspinSourcePublisher | None = None
     whole_house_action = None
     if config.sendspin.source_enabled:
+        async def source_stopped(source: Source) -> None:
+            if source is not Source.PHONO:
+                return
+            phono_downstairs_marker.unlink(missing_ok=True)
+            await state.set_phono_output_mode(PhonoOutputMode.LOCAL)
+            await events.emit(
+                "phono_output_mode_changed",
+                {"mode": PhonoOutputMode.LOCAL.value, "source": "music_assistant_stop"},
+            )
+
         publisher = SendspinSourcePublisher(
             config.sendspin,
             config.audio,
@@ -194,6 +204,7 @@ async def run_daemon(config: Config) -> None:
             bluetooth_media=(
                 bluetooth_manager if config.bluetooth.enabled else None
             ),
+            source_stop_action=source_stopped,
         )
         await publisher.set_distribution_enabled(not state.local_playback_only)
         await publisher.set_source_distribution_enabled(
@@ -239,25 +250,35 @@ async def run_daemon(config: Config) -> None:
     )
 
     def distribution_available() -> bool:
+        phono_stop_grace = bool(
+            publisher is not None
+            and publisher.phono_stop_pending
+            and state.status is not None
+            and state.status.route is Route.DISTRIBUTED_PHONO
+        )
         return bool(
-            not state.local_playback_only
-            and publisher is not None
-            and state.sendspin_source.get("connected")
-            and state.sendspin_source.get("stream_requested")
-            and state.music_assistant.get("connected")
-            and music_assistant.console_playing
+            phono_stop_grace
+            or (
+                not state.local_playback_only
+                and publisher is not None
+                and state.sendspin_source.get("connected")
+                and state.sendspin_source.get("stream_requested")
+                and state.music_assistant.get("connected")
+                and music_assistant.console_playing
+            )
         )
 
     def distribution_capable(source: Source) -> bool:
         return bool(
-            (
+            publisher is not None
+            and (
                 source is Source.BLUETOOTH
                 and timestamped_bluetooth is not None
                 or source is Source.PHONO
                 and state.phono_output_mode is PhonoOutputMode.DOWNSTAIRS
+                and not publisher.phono_stop_pending
             )
             and not state.local_playback_only
-            and publisher is not None
             and publisher.client_id is not None
             and state.sendspin_source.get("connected")
             and state.music_assistant.get("connected")
@@ -265,6 +286,8 @@ async def run_daemon(config: Config) -> None:
 
     async def prepare_distribution(source: Source) -> bool:
         if publisher is None or publisher.client_id is None:
+            return False
+        if source is Source.PHONO and publisher.phono_stop_pending:
             return False
         await publisher.select_source(source)
         if not state.sendspin_source.get("stream_requested"):

@@ -86,6 +86,10 @@ such as vocals sound hollow or phase-cancelled.
 - Music Assistant's Live Input play/stop commands are forwarded to the phone
   over Bluetooth AVRCP. An intentional stop is latched until playback is
   explicitly resumed, so line sensing cannot immediately restart the group.
+- Stopping distributed phono from Music Assistant cannot stop the physical
+  record, so it changes the sticky phono output mode back to Local and resumes
+  direct console playback. Brief stop/start commands used while MA rebuilds a
+  group are ignored.
 - If MA, Sendspin, or the network is unavailable, Bluetooth falls back to the
   direct local output path. Phono does too in Console mode; when Downstairs was
   explicitly selected, direct phono stays muted until synchronization succeeds

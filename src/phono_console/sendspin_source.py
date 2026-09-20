@@ -33,6 +33,7 @@ SIGNAL_RELEASE_SECONDS = 1.0
 
 PcmStreamFactory = Callable[[], AsyncIterator[bytes | TimestampedPcm]]
 ClientFactory = Callable[[], Awaitable[object]]
+SourceStopAction = Callable[[Source], Awaitable[None]]
 
 
 class BluetoothMedia(Protocol):
@@ -124,6 +125,8 @@ class SendspinSourcePublisher:
         source_devices: dict[Source, str] | None = None,
         pcm_stream_factories: dict[Source, PcmStreamFactory] | None = None,
         bluetooth_media: BluetoothMedia | None = None,
+        source_stop_action: SourceStopAction | None = None,
+        phono_stop_grace_seconds: float = 1.0,
     ) -> None:
         self.config = sendspin
         self.audio = audio
@@ -158,8 +161,33 @@ class SendspinSourcePublisher:
         }
         self._pcm_stream_factories = pcm_stream_factories or {}
         self._bluetooth_media = bluetooth_media
+        self._source_stop_action = source_stop_action
+        self._phono_stop_grace_seconds = phono_stop_grace_seconds
+        self._phono_stop_task: asyncio.Task[None] | None = None
         self._bluetooth_pause_latched = False
         self._bluetooth_pause_observed = False
+
+    @property
+    def phono_stop_pending(self) -> bool:
+        return self._phono_stop_task is not None
+
+    def _cancel_phono_stop(self) -> None:
+        if self._phono_stop_task is not None:
+            self._phono_stop_task.cancel()
+            self._phono_stop_task = None
+
+    async def _commit_phono_stop(self) -> None:
+        task = asyncio.current_task()
+        try:
+            await asyncio.sleep(self._phono_stop_grace_seconds)
+            if self._source_stop_action is not None:
+                await self._source_stop_action(Source.PHONO)
+        except asyncio.CancelledError:
+            return
+        finally:
+            if self._phono_stop_task is task:
+                self._phono_stop_task = None
+            await self._publish_state()
 
     async def set_distribution_enabled(self, enabled: bool) -> None:
         self._distribution_enabled = enabled
@@ -266,6 +294,7 @@ class SendspinSourcePublisher:
                 "client_id": self.client_id,
                 "pairing_token": self.pairing_token,
                 "stream_requested": self._stream_requested,
+                "phono_stop_pending": self.phono_stop_pending,
                 "error": self._stream_error,
                 "selected_source": self._selected_source.value,
             }
@@ -310,9 +339,16 @@ class SendspinSourcePublisher:
                         {"command": transport_command, "error": str(exc)},
                     )
             if command == "start":
+                self._cancel_phono_stop()
                 await self._start_streaming()
             else:
                 await self._stop_streaming()
+                if self._selected_source is Source.PHONO:
+                    self._cancel_phono_stop()
+                    self._phono_stop_task = asyncio.create_task(
+                        self._commit_phono_stop()
+                    )
+                    await self._publish_state()
 
     async def _start_streaming(self) -> None:
         self._stream_requested = True
@@ -620,6 +656,7 @@ class SendspinSourcePublisher:
                 if not stop.is_set():
                     await self._wait_retry(stop)
         finally:
+            self._cancel_phono_stop()
             signal_task.cancel()
             with suppress(asyncio.CancelledError):
                 await signal_task

@@ -243,6 +243,56 @@ def test_bluetooth_source_commands_control_phone_and_latch_pause() -> None:
     asyncio.run(scenario())
 
 
+def test_phono_stop_reverts_output_after_grace_period() -> None:
+    async def scenario() -> None:
+        stopped: list[str] = []
+
+        async def source_stopped(source: Source) -> None:
+            stopped.append(source.value)
+
+        publisher = SendspinSourcePublisher(
+            SENDSPIN,
+            AUDIO,
+            SimulatedEventSink(),
+            StateStore(),
+            source_stop_action=source_stopped,
+            phono_stop_grace_seconds=0.01,
+        )
+
+        await publisher._handle_server_command("stop")
+        assert publisher.phono_stop_pending
+        await asyncio.sleep(0.02)
+        assert stopped == ["phono"]
+        assert not publisher.phono_stop_pending
+
+    asyncio.run(scenario())
+
+
+def test_phono_restart_during_grace_period_preserves_downstairs_mode() -> None:
+    async def scenario() -> None:
+        stopped: list[str] = []
+
+        async def source_stopped(source: Source) -> None:
+            stopped.append(source.value)
+
+        publisher = SendspinSourcePublisher(
+            SENDSPIN,
+            AUDIO,
+            SimulatedEventSink(),
+            StateStore(),
+            source_stop_action=source_stopped,
+            phono_stop_grace_seconds=0.02,
+        )
+
+        await publisher._handle_server_command("stop")
+        await publisher._handle_server_command("start")
+        await asyncio.sleep(0.03)
+        assert stopped == []
+        assert not publisher.phono_stop_pending
+
+    asyncio.run(scenario())
+
+
 def test_publisher_reconnects_after_connect_failure() -> None:
     async def scenario() -> None:
         client = FakeClient(connect_error=OSError("refused"))
