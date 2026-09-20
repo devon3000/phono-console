@@ -81,6 +81,17 @@ preferred_device() {
   fi
 }
 
+preferred_playback_device() {
+  local entry
+  for entry in "$@"; do
+    if [[ "$entry" == hw:CARD=vc4hdmi0,* ]]; then
+      printf '%s' "${entry%%|*}"
+      return
+    fi
+  done
+  preferred_device "$@"
+}
+
 choose_audio_device() {
   local direction="$1" default="$2" choice index entry
   shift 2
@@ -110,7 +121,7 @@ choose_audio_device() {
 echo "Installing system packages..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  alsa-utils bluez bluez-alsa-utils build-essential curl ffmpeg libasound2-dev \
+  alsa-utils bluez bluez-alsa-utils build-essential cec-utils curl ffmpeg libasound2-dev \
   libportaudio2 libsamplerate0-dev pkg-config python3 python3-venv rfkill
 
 modprobe snd-aloop
@@ -152,6 +163,9 @@ make -C "$SOURCE_DIR/native" BUILD_DIR="$release_dir/native-build" all
 install -m 0755 \
   "$release_dir/native-build/phono-audio-engine" \
   "$release_dir/phono-audio-engine"
+install -d -m 0755 "$release_dir/bin"
+install -m 0755 "$SOURCE_DIR/scripts/cec-volume-hook.sh" \
+  "$release_dir/bin/cec-volume-hook"
 
 # The sendspin player pins aiosendspin 6.x while the routing daemon's source
 # client needs 9.x, so the player lives in its own venv.
@@ -168,7 +182,7 @@ existing_sendspin_url=""
 mapfile -t capture_hardware < <(list_hardware_devices arecord)
 mapfile -t playback_hardware < <(list_hardware_devices aplay)
 default_capture_device="$(preferred_device "${capture_hardware[@]}")"
-default_playback_device="$(preferred_device "${playback_hardware[@]}")"
+default_playback_device="$(preferred_playback_device "${playback_hardware[@]}")"
 if [[ -e "$CONFIG_FILE" ]]; then
   existing_ma_url="$(config_value music_assistant base_url)"
   existing_ma_player="$(config_value music_assistant console_player)"
@@ -337,6 +351,12 @@ poll_interval_ms = 100
 api_host = "0.0.0.0"
 api_port = 8765
 api_token_env = "PHONO_CONSOLE_API_TOKEN"
+
+[amplifier]
+enabled = true
+cec_device = "/dev/cec0"
+logical_address = 5
+wake_on_audio = true
 EOF
 fi
 
@@ -402,6 +422,16 @@ output_prebuffer_ms = 80
 route_fade_ms = 8
 max_soft_correction_ppm = 250
 queue_frames = 50
+EOF
+fi
+if ! grep -q '^\[amplifier\]' "$CONFIG_FILE"; then
+  cat >>"$CONFIG_FILE" <<'EOF'
+
+[amplifier]
+enabled = true
+cec_device = "/dev/cec0"
+logical_address = 5
+wake_on_audio = true
 EOF
 fi
 if [[ -n "$requested_audio_backend" ]]; then

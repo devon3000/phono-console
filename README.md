@@ -1,7 +1,8 @@
 # Phono Console
 
 Software-defined audio routing for a turntable/Bluetooth console built around
-one Behringer UFO202 and one Raspberry Pi.
+one Behringer UFO202 and one Raspberry Pi, with HDMI audio and CEC control of
+the console amplifier.
 
 ## Raspberry Pi installation
 
@@ -14,8 +15,9 @@ sudo ./scripts/install.sh
 ```
 
 It installs ALSA and the Python application into an isolated virtual
-environment, enumerates the available capture and playback devices, and
-prefers a connected UFO202 automatically. Capture and playback can be selected
+environment, enumerates the available capture and playback devices, prefers a
+connected UFO202 for capture, and prefers Raspberry Pi HDMI 1 for playback.
+Capture and playback can be selected
 independently by number or by entering any ALSA PCM name. If no audio hardware
 is connected, the default `null` devices keep the services and dashboard
 running so network and Music Assistant setup can be completed first. The
@@ -59,13 +61,17 @@ existing selection.
 ```text
 Turntable → UFO202 phono input → USB → Raspberry Pi
                                       ↓
-Amplifier ← UFO202 RCA output  ← USB playback
-    ↓
-Console speakers
+                         HDMI audio + CEC
+                                      ↓
+                         Yamaha SR-300 (HDMI 1)
+                                      ↓
+                            Console speakers
 ```
 
-Every source passes through the Pi. There is no split analog feed, separate
-phono amplifier input, hardware monitor path, or physical input selector.
+Every source passes through the Pi. The UFO202 is capture-only; its hardware
+monitor output is not used. The Yamaha should use a plain stereo listening mode
+for HDMI playback, since its surround processing can make centered material
+such as vocals sound hollow or phase-cancelled.
 
 ## Automatic behavior
 
@@ -85,6 +91,10 @@ phono amplifier input, hardware monitor path, or physical input selector.
   explicitly selected, direct phono stays muted until synchronization succeeds
   or the user switches back to Console, preventing delayed double playback.
 - Nothing is active: output silence.
+- The first active route wakes the Yamaha over HDMI-CEC. The Phono Console
+  volume exposed by Music Assistant controls the Yamaha's reported absolute
+  volume instead of applying software attenuation. The same control path is
+  available at `PUT /v1/amplifier/volume` for the hardware encoder.
 
 Priority is phono, then actively streaming Bluetooth, then Music Assistant.
 There is no manual source selector. Level thresholds, debounce, and hold times

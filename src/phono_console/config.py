@@ -82,6 +82,14 @@ class AudioEngineConfig:
 
 
 @dataclass(frozen=True)
+class AmplifierConfig:
+    enabled: bool = True
+    cec_device: str = "/dev/cec0"
+    logical_address: int = 5
+    wake_on_audio: bool = True
+
+
+@dataclass(frozen=True)
 class Config:
     audio: AudioConfig
     detection: DetectionConfig
@@ -91,6 +99,7 @@ class Config:
     routing: RoutingConfig = RoutingConfig()
     runtime: RuntimeConfig = RuntimeConfig()
     audio_engine: AudioEngineConfig = AudioEngineConfig()
+    amplifier: AmplifierConfig = AmplifierConfig()
 
 
 def _required(table: dict, key: str, section: str):
@@ -112,6 +121,7 @@ def load_config(path: Path) -> Config:
     bluetooth = raw.get("bluetooth", {})
     routing = raw.get("routing", {})
     audio_engine = raw.get("audio_engine", {})
+    amplifier = raw.get("amplifier", {})
 
     config = Config(
         audio=AudioConfig(
@@ -206,6 +216,12 @@ def load_config(path: Path) -> Config:
             ),
             queue_frames=int(audio_engine.get("queue_frames", 50)),
         ),
+        amplifier=AmplifierConfig(
+            enabled=bool(amplifier.get("enabled", True)),
+            cec_device=str(amplifier.get("cec_device", "/dev/cec0")),
+            logical_address=int(amplifier.get("logical_address", 5)),
+            wake_on_audio=bool(amplifier.get("wake_on_audio", True)),
+        ),
     )
     _validate(config)
     return config
@@ -256,3 +272,7 @@ def _validate(config: Config) -> None:
         raise ValueError("audio_engine.max_soft_correction_ppm is invalid")
     if not 2 <= config.audio_engine.queue_frames <= 500:
         raise ValueError("audio_engine.queue_frames must be between 2 and 500")
+    if not config.amplifier.cec_device.startswith("/"):
+        raise ValueError("amplifier.cec_device must be absolute")
+    if not 0 <= config.amplifier.logical_address <= 15:
+        raise ValueError("amplifier.logical_address must be between 0 and 15")

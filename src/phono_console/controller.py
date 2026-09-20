@@ -55,6 +55,7 @@ class Controller:
         phono_output_mode: Callable[[], PhonoOutputMode] | None = None,
         expire_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
         refresh_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
+        activate_output: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.config = config
         self.level_monitor = level_monitor
@@ -70,6 +71,7 @@ class Controller:
         self.phono_output_mode = phono_output_mode or (lambda: PhonoOutputMode.LOCAL)
         self.expire_phono_output_mode = expire_phono_output_mode
         self.refresh_phono_output_mode = refresh_phono_output_mode
+        self.activate_output = activate_output
         self._phono_mode_inactive_since: float | None = None
         self._phono_mode_last_refresh: float | None = None
         self.detector = ActivityDetector(
@@ -335,6 +337,15 @@ class Controller:
                 self.route.value if self.route else "startup",
                 desired_route.value,
             )
+        if (
+            desired_route is not Route.IDLE
+            and (self.route is None or self.route is Route.IDLE)
+            and self.activate_output is not None
+        ):
+            try:
+                await self.activate_output()
+            except Exception as exc:
+                await self._set_component("amplifier", "degraded", str(exc))
         try:
             # Reconcile every tick so a child process that dies while the
             # desired route is unchanged is supervised and restarted.

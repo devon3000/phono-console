@@ -14,6 +14,8 @@ ExecStart=/opt/phono-console/current/player-venv/bin/sendspin daemon \
   --name ${PHONO_PLAYER_NAME} \
   --id phono-console \
   --audio-device ${PHONO_PLAYER_AUDIO_DEVICE} \
+  --hardware-volume false \
+  --hook-set-volume /opt/phono-console/current/bin/cec-volume-hook \
   --settings-dir /var/lib/phono-console/sendspin \
   --disable-mpris
 Restart=always

@@ -216,7 +216,7 @@ function render(data) {
     : phonoMode === "downstairs" && activeRoute === "distributed_phono"
     ? `Record is playing synchronized on Downstairs. After ${stickyMinutes} minutes without phono signal, Console becomes the default again.`
     : phonoMode === "downstairs" && data.status?.phono_active
-    ? "Connecting Downstairs. Direct console playback is muted until the synchronized return path is ready."
+    ? "Connecting Downstairs. Direct console playback continues until the synchronized return path is ready."
     : phonoMode === "downstairs"
     ? "Downstairs is selected for the next record; no phono signal is active."
     : "Records play directly on the console with minimum latency.";

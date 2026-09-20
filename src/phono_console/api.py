@@ -15,6 +15,7 @@ LevelResetAction = Callable[[], None]
 PairingAction = Callable[[], Awaitable[None]]
 BluetoothDeviceAction = Callable[[str, str], Awaitable[None]]
 BluetoothMediaAction = Callable[[str], Awaitable[None]]
+AmplifierVolumeAction = Callable[[int], Awaitable[tuple[int, bool]]]
 LocalOnlyAction = Callable[[bool], Awaitable[None]]
 PhonoOutputAction = Callable[[PhonoOutputMode], Awaitable[None]]
 PUBLIC_PATHS = frozenset(("/", "/assets/dashboard.css", "/assets/dashboard.js"))
@@ -37,6 +38,7 @@ class ControlApi:
         pairing_close_action: PairingAction | None = None,
         bluetooth_device_action: BluetoothDeviceAction | None = None,
         bluetooth_media_action: BluetoothMediaAction | None = None,
+        amplifier_volume_action: AmplifierVolumeAction | None = None,
         local_only_action: LocalOnlyAction | None = None,
         phono_output_action: PhonoOutputAction | None = None,
     ) -> None:
@@ -49,6 +51,7 @@ class ControlApi:
         self.pairing_close_action = pairing_close_action
         self.bluetooth_device_action = bluetooth_device_action
         self.bluetooth_media_action = bluetooth_media_action
+        self.amplifier_volume_action = amplifier_volume_action
         self.local_only_action = local_only_action
         self.phono_output_action = phono_output_action
         self._whole_house_lock = asyncio.Lock()
@@ -153,6 +156,16 @@ class ControlApi:
         except Exception as exc:
             raise web.HTTPServiceUnavailable(text=str(exc)) from exc
         return web.json_response({"command": command})
+
+    async def amplifier_volume(self, request: web.Request) -> web.Response:
+        if self.amplifier_volume_action is None:
+            raise web.HTTPConflict(text="CEC amplifier control is unavailable")
+        body = await request.json()
+        volume = body.get("volume")
+        if not isinstance(volume, int) or not 0 <= volume <= 100:
+            raise web.HTTPBadRequest(text="volume must be an integer from 0 to 100")
+        actual, muted = await self.amplifier_volume_action(volume)
+        return web.json_response({"volume": actual, "muted": muted})
 
     async def set_local_only(self, request: web.Request) -> web.Response:
         body = await request.json()
@@ -270,6 +283,7 @@ class ControlApi:
                 web.put("/v1/bluetooth/pairing", self.set_bluetooth_pairing),
                 web.post("/v1/bluetooth/device", self.bluetooth_device),
                 web.post("/v1/bluetooth/media", self.bluetooth_media),
+                web.put("/v1/amplifier/volume", self.amplifier_volume),
                 web.put("/v1/local-only", self.set_local_only),
                 web.put("/v1/phono-output", self.set_phono_output),
                 web.put("/v1/whole-house", self.set_whole_house),

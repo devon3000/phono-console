@@ -27,6 +27,8 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     installer = (ROOT / "scripts" / "install.sh").read_text()
     assert "list_hardware_devices arecord" in installer
     assert "list_hardware_devices aplay" in installer
+    assert 'hw:CARD=vc4hdmi0,' in installer
+    assert 'default_playback_device="$(preferred_playback_device' in installer
     assert '"default|ALSA system default"' in installer
     assert '"null|virtual device' in installer
     assert (
@@ -46,6 +48,13 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     ).read_text()
     assert "bluez-alsa-utils" in installer
     assert "snd-aloop" in installer
+    assert "cec-utils" in installer
+    assert "cec-volume-hook" in installer
+    assert '[amplifier]' in installer
+    assert 'cec_device = "/dev/cec0"' in installer
+    player_unit = (ROOT / "systemd" / "phono-console-player.service").read_text()
+    assert "--hook-set-volume" in player_unit
+    assert "--hardware-volume false" in player_unit
     assert "sed '/^hw:CARD=Loopback,/d'" in installer
     assert 'PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"' in installer
     assert "type dmix" not in installer

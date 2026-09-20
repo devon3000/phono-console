@@ -14,6 +14,7 @@ from aiohttp import web
 from .alsa import ArecordLevelMonitor
 from .api import ControlApi, WholeHouseError
 from .audio_engine_backend import TimestampedBluetoothBackend
+from .amplifier import CecAmplifier
 from .bluetooth import BluetoothManager
 from .config import Config
 from .controller import Controller
@@ -122,6 +123,7 @@ async def run_daemon(config: Config) -> None:
         PhonoOutputMode.DOWNSTAIRS if marker_is_fresh else PhonoOutputMode.LOCAL
     )
     events = CompositeEventSink(LoggingEventSink(), state)
+    amplifier = CecAmplifier(config.amplifier, events, state)
     bluetooth_manager = BluetoothManager(config.bluetooth, events, state)
     launcher = SubprocessLauncher()
     timestamped_bluetooth = (
@@ -317,6 +319,7 @@ async def run_daemon(config: Config) -> None:
         phono_output_mode=lambda: state.phono_output_mode,
         expire_phono_output_mode=expire_phono_output_mode,
         refresh_phono_output_mode=refresh_phono_output_mode,
+        activate_output=amplifier.power_on,
     )
 
     api_token = os.getenv(config.runtime.api_token_env) or None
@@ -446,6 +449,9 @@ async def run_daemon(config: Config) -> None:
         ),
         bluetooth_media_action=(
             bluetooth_manager.media_command if config.bluetooth.enabled else None
+        ),
+        amplifier_volume_action=(
+            amplifier.set_volume if config.amplifier.enabled else None
         ),
         local_only_action=local_only_action,
         phono_output_action=phono_output_action,

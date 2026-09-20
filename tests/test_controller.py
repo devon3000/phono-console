@@ -48,6 +48,33 @@ def test_controller_applies_only_changed_routes() -> None:
     asyncio.run(scenario())
 
 
+def test_controller_wakes_amplifier_on_first_active_route() -> None:
+    async def scenario() -> None:
+        level = SimulatedLevelMonitor()
+        wakes = 0
+
+        async def wake() -> None:
+            nonlocal wakes
+            wakes += 1
+
+        subject = Controller(
+            config(),
+            level,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            activate_output=wake,
+        )
+        await subject.tick(now=0)
+        level.level = -20
+        await subject.tick(now=1)
+        await subject.tick(now=1.25)
+        await subject.tick(now=2)
+        assert wakes == 1
+
+    asyncio.run(scenario())
+
+
 def test_controller_capture_failure_fails_silent_and_recovers() -> None:
     class FlakyMonitor:
         calls = 0

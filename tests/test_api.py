@@ -268,3 +268,27 @@ def test_api_controls_bluetooth_media() -> None:
             await client.close()
 
     asyncio.run(scenario())
+
+
+def test_api_controls_cec_amplifier_volume() -> None:
+    async def scenario() -> None:
+        calls: list[int] = []
+
+        async def action(volume: int) -> tuple[int, bool]:
+            calls.append(volume)
+            return volume, False
+
+        api = ControlApi(StateStore(), None, amplifier_volume_action=action)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.put(
+                "/v1/amplifier/volume", json={"volume": 28}
+            )
+            assert response.status == 200
+            assert await response.json() == {"volume": 28, "muted": False}
+            assert calls == [28]
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())

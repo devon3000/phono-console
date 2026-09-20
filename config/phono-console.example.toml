@@ -1,6 +1,6 @@
 [audio]
 capture_device = "UFO202"
-playback_device = "UFO202"
+playback_device = "hw:CARD=vc4hdmi0,DEV=0"
 target_latency_ms = 40
 sample_rate = 48000
 channels = 2
@@ -39,6 +39,12 @@ output_prebuffer_ms = 80
 route_fade_ms = 8
 max_soft_correction_ppm = 250
 queue_frames = 50
+
+[amplifier]
+enabled = true
+cec_device = "/dev/cec0"
+logical_address = 5
+wake_on_audio = true
 
 [music_assistant]
 base_url = "http://music-assistant.local"
