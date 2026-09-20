@@ -69,7 +69,10 @@ class CecAmplifier:
             await asyncio.wait_for(process.wait(), timeout=1)
         if process.returncode is None:
             process.terminate()
-            with suppress(Exception):
+            try:
+                await asyncio.wait_for(process.wait(), timeout=1)
+            except asyncio.TimeoutError:
+                process.kill()
                 await process.wait()
 
     async def _publish(self, **details: object) -> None:

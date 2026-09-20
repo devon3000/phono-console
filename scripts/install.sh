@@ -134,10 +134,10 @@ if ! getent group phono-console >/dev/null; then
 fi
 getent group bluetooth >/dev/null || groupadd --system bluetooth
 if ! id phono-console >/dev/null 2>&1; then
-  useradd --system --gid phono-console --groups audio,bluetooth \
+  useradd --system --gid phono-console --groups audio,bluetooth,video \
     --home-dir /var/lib/phono-console --shell /usr/sbin/nologin phono-console
 else
-  usermod -a -G audio,bluetooth phono-console
+  usermod -a -G audio,bluetooth,video phono-console
 fi
 install -d -o phono-console -g phono-console -m 0750 /var/lib/phono-console
 chown -R phono-console:phono-console /var/lib/phono-console
