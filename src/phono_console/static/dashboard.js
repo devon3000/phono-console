@@ -201,6 +201,7 @@ function render(data) {
   }
   const localOnly = Boolean(data.local_playback_only);
   const phonoMode = data.phono_output_mode || "local";
+  const activeRoute = data.status?.route || "idle";
   const stickyMinutes = Number(data.system?.phono_mode_sticky_minutes || 60);
   byId("phono-local").className = phonoMode === "local" ? "primary-button" : "secondary-button";
   byId("phono-downstairs").className = phonoMode === "downstairs" ? "primary-button" : "secondary-button";
@@ -212,8 +213,12 @@ function render(data) {
     ? "Local-only mode is on. Phono and Bluetooth bypass Music Assistant."
     : pairing
     ? "Bluetooth pairing is open temporarily. Select PhonoConsole on your phone."
+    : phonoMode === "downstairs" && activeRoute === "distributed_phono"
+    ? `Record is playing synchronized on Downstairs. After ${stickyMinutes} minutes without phono signal, Console becomes the default again.`
+    : phonoMode === "downstairs" && data.status?.phono_active
+    ? "Connecting Downstairs. Direct console playback is muted until the synchronized return path is ready."
     : phonoMode === "downstairs"
-    ? `Records play synchronized on Downstairs. After ${stickyMinutes} minutes without phono signal, Console becomes the default again.`
+    ? "Downstairs is selected for the next record; no phono signal is active."
     : "Records play directly on the console with minimum latency.";
 }
 

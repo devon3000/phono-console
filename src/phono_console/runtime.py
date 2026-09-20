@@ -395,6 +395,11 @@ async def run_daemon(config: Config) -> None:
             # If a record is already playing, move it immediately; otherwise
             # the controller starts distribution when it first detects phono.
             if state.status is not None and state.status.phono_active:
+                # Fail-safe handoff: release direct monitoring before asking
+                # MA to start a delayed synchronized path. The controller sees
+                # the already-published DOWNSTAIRS mode and keeps it muted
+                # until the Sendspin return path is confirmed.
+                await router.apply(Route.IDLE)
                 await publisher.select_source(Source.PHONO)
                 started = await music_assistant.play_vinyl_source(
                     publisher.client_id, (config.routing.distribution_target,)

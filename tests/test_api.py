@@ -223,6 +223,27 @@ def test_api_controls_sticky_phono_output_mode() -> None:
     asyncio.run(scenario())
 
 
+def test_api_rolls_back_phono_mode_when_handoff_fails() -> None:
+    async def scenario() -> None:
+        async def action(_mode) -> None:
+            raise RuntimeError("MA unavailable")
+
+        state = StateStore()
+        api = ControlApi(state, None, phono_output_action=action)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.put(
+                "/v1/phono-output", json={"mode": "downstairs"}
+            )
+            assert response.status == 503
+            assert state.snapshot()["phono_output_mode"] == "local"
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
 def test_api_controls_bluetooth_media() -> None:
     async def scenario() -> None:
         calls: list[str] = []
