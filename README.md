@@ -105,7 +105,8 @@ such as vocals sound hollow or phase-cancelled.
   available at `PUT /v1/amplifier/volume` for the hardware encoder.
   Music Assistant's 1–100 range maps to Yamaha 15–45 by default, reducing CEC
   traffic and imposing a safe maximum; both endpoints are configurable under
-  `[amplifier]`. Volume 0 mutes the Yamaha.
+  `[amplifier]`. Volume 0 mutes the Yamaha. `wake_settle_seconds` delays audio
+  and volume commands after a CEC wake so the receiver can finish starting.
   Waking the Yamaha never resets its volume; Music Assistant remains the
   authority for group-member levels and their relative balance.
   Local phono has a separate persistent logical-volume profile (50 by default),

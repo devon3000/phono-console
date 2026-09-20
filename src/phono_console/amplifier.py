@@ -104,6 +104,7 @@ class CecAmplifier:
                     process, f"tx 1{self.config.logical_address:x}:8f"
                 )
                 status = await self._read_match(process, _POWER_STATUS, timeout=2)
+                awakened = status != 0
                 if status != 0:
                     await self._send(process, f"on {self.config.logical_address}")
                 deadline = asyncio.get_running_loop().time() + 8
@@ -116,10 +117,18 @@ class CecAmplifier:
                     )
                     if status != 0:
                         await asyncio.sleep(0.25)
-                await self._publish(powered=status == 0)
+                # The SR-300 reports CEC power=on before its HDMI audio and
+                # front-panel volume controller are actually ready. Sending
+                # volume keys or opening the ALSA route during that interval
+                # can leave it in a half-awake state until it is power-cycled.
+                # Only delay after a real wake; an already-on amplifier remains
+                # instant.
+                if awakened and status == 0:
+                    await asyncio.sleep(self.config.wake_settle_seconds)
+                await self._publish(powered=status == 0, awakened=awakened)
                 await self.events.emit(
                     "amplifier_power_on",
-                    {"power_status": status},
+                    {"power_status": status, "awakened": awakened},
                 )
             finally:
                 await self._close(process)

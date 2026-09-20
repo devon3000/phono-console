@@ -87,6 +87,7 @@ class AmplifierConfig:
     cec_device: str = "/dev/cec0"
     logical_address: int = 5
     wake_on_audio: bool = True
+    wake_settle_seconds: float = 4.0
     volume_min: int = 15
     volume_max: int = 45
     local_phono_volume: int = 50
@@ -224,6 +225,7 @@ def load_config(path: Path) -> Config:
             cec_device=str(amplifier.get("cec_device", "/dev/cec0")),
             logical_address=int(amplifier.get("logical_address", 5)),
             wake_on_audio=bool(amplifier.get("wake_on_audio", True)),
+            wake_settle_seconds=float(amplifier.get("wake_settle_seconds", 4.0)),
             volume_min=int(amplifier.get("volume_min", 15)),
             volume_max=int(amplifier.get("volume_max", 45)),
             local_phono_volume=int(amplifier.get("local_phono_volume", 50)),

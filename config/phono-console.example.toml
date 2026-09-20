@@ -45,6 +45,7 @@ enabled = true
 cec_device = "/dev/cec0"
 logical_address = 5
 wake_on_audio = true
+wake_settle_seconds = 4.0
 volume_min = 15
 volume_max = 45
 local_phono_volume = 50
