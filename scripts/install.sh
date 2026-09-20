@@ -60,7 +60,8 @@ PY
 list_hardware_devices() {
   local command="$1"
   "$command" -l 2>/dev/null | sed -nE \
-    's/^card ([0-9]+): ([^ ]+) \[([^]]+)\], device ([0-9]+): (.*)$/hw:CARD=\2,DEV=\4|card \1: \3, device \4: \5/p'
+    's/^card ([0-9]+): ([^ ]+) \[([^]]+)\], device ([0-9]+): (.*)$/hw:CARD=\2,DEV=\4|card \1: \3, device \4: \5/p' | \
+    sed '/^hw:CARD=Loopback,/d'
 }
 
 preferred_device() {
@@ -159,11 +160,21 @@ python3 -m venv "$release_dir/player-venv"
 "$release_dir/player-venv/bin/pip" install "sendspin>=7.5,<8"
 
 keep_existing=false
+existing_ma_url=""
+existing_ma_player=""
+existing_vinyl_source=""
+existing_whole_house_group=""
+existing_sendspin_url=""
 mapfile -t capture_hardware < <(list_hardware_devices arecord)
 mapfile -t playback_hardware < <(list_hardware_devices aplay)
 default_capture_device="$(preferred_device "${capture_hardware[@]}")"
 default_playback_device="$(preferred_device "${playback_hardware[@]}")"
 if [[ -e "$CONFIG_FILE" ]]; then
+  existing_ma_url="$(config_value music_assistant base_url)"
+  existing_ma_player="$(config_value music_assistant console_player)"
+  existing_vinyl_source="$(config_value music_assistant vinyl_source)"
+  existing_whole_house_group="$(config_value music_assistant whole_house_players)"
+  existing_sendspin_url="$(config_value sendspin server_url)"
   keep_answer="$(prompt "Keep existing configuration and audio selection? (y/n)" "y")"
   if [[ "$keep_answer" =~ ^[Yy] ]]; then
     keep_existing=true
@@ -176,11 +187,11 @@ if [[ "$keep_existing" == true ]]; then
   playback_device="$(config_value audio playback_device)"
   raw_capture_device="$capture_device"
   raw_playback_device="$playback_device"
-  ma_url="$(config_value music_assistant base_url)"
-  ma_player="$(config_value music_assistant console_player)"
-  vinyl_source="$(config_value music_assistant vinyl_source)"
-  whole_house_group="$(config_value music_assistant whole_house_players)"
-  sendspin_url="$(config_value sendspin server_url)"
+  ma_url="$existing_ma_url"
+  ma_player="$existing_ma_player"
+  vinyl_source="$existing_vinyl_source"
+  whole_house_group="$existing_whole_house_group"
+  sendspin_url="$existing_sendspin_url"
   if [[ "$capture_device" == "null" && "$default_capture_device" != "null" ]]; then
     echo "Replacing legacy null capture with detected hardware: $default_capture_device"
     raw_capture_device="$default_capture_device"
@@ -263,11 +274,11 @@ pcm.console_bt_capture {
   slave.pcm "console_bt_capture_raw"
 }
 EOF
-ma_url="$(prompt "Music Assistant URL" "http://music-assistant.local")"
-ma_player="$(prompt "Music Assistant console player" "Phono Console")"
-vinyl_source="$(prompt "Music Assistant console input" "Console Input")"
-whole_house_group="$(prompt "Whole-house player group" "Downstairs")"
-sendspin_url="$(prompt "Sendspin server URL" "ws://music-assistant.local:8927/sendspin")"
+ma_url="$(prompt "Music Assistant URL" "${existing_ma_url:-http://music-assistant.local}")"
+ma_player="$(prompt "Music Assistant console player" "${existing_ma_player:-Phono Console}")"
+vinyl_source="$(prompt "Music Assistant console input" "${existing_vinyl_source:-Console Input}")"
+whole_house_group="$(prompt "Whole-house player group" "${existing_whole_house_group:-Downstairs}")"
+sendspin_url="$(prompt "Sendspin server URL" "${existing_sendspin_url:-ws://music-assistant.local:8927/sendspin}")"
 
 if [[ -e "$CONFIG_FILE" ]]; then
   config_backup="$CONFIG_FILE.$(date -u +%Y%m%dT%H%M%SZ).bak"

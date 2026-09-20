@@ -46,6 +46,7 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     ).read_text()
     assert "bluez-alsa-utils" in installer
     assert "snd-aloop" in installer
+    assert "sed '/^hw:CARD=Loopback,/d'" in installer
     assert 'PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"' in installer
     assert "type dmix" not in installer
     assert (ROOT / "systemd" / "phono-console-bluetooth.service").is_file()
@@ -71,6 +72,17 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "RuntimeDirectory=phono-console" in engine_unit
     for package in ("curl", "ffmpeg", "libportaudio2"):
         assert package in installer
+
+
+def test_reconfiguration_preserves_existing_music_assistant_defaults() -> None:
+    installer = (ROOT / "scripts" / "install.sh").read_text()
+    assert 'existing_ma_url="$(config_value music_assistant base_url)"' in installer
+    assert 'existing_sendspin_url="$(config_value sendspin server_url)"' in installer
+    assert '${existing_ma_url:-http://music-assistant.local}' in installer
+    assert (
+        '${existing_sendspin_url:-ws://music-assistant.local:8927/sendspin}'
+        in installer
+    )
 
 
 def test_installer_migrates_the_legacy_null_capture() -> None:
