@@ -111,8 +111,9 @@ such as vocals sound hollow or phase-cancelled.
   Local phono has a separate persistent logical-volume profile (50 by default),
   restored whenever direct record playback begins. Direct controls used during
   local phono update that profile; MA volume-hook calls never overwrite it.
-  The Pi also announces itself as the active CEC source whenever playback
-  begins from idle, selecting Yamaha HDMI1 in the installed wiring.
+  Phono Console deliberately does not send CEC active-source/input-switching
+  commands: the SR-300 normally remembers HDMI1, and forced switching can
+  leave this older receiver's HDMI audio and volume control unresponsive.
 
 Priority is phono, then actively streaming Bluetooth, then Music Assistant.
 There is no manual source selector. Level thresholds, debounce, and hold times

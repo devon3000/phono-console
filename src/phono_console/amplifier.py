@@ -116,15 +116,10 @@ class CecAmplifier:
                     )
                     if status != 0:
                         await asyncio.sleep(0.25)
-                # Advertise the Pi's detected physical address as active. With
-                # the Pi connected to Yamaha HDMI1 this selects HDMI1 without
-                # baking the topology's 1.0.0.0 address into configuration.
-                await self._send(process, "as")
-                await asyncio.sleep(0.25)
                 await self._publish(powered=status == 0)
                 await self.events.emit(
                     "amplifier_power_on",
-                    {"power_status": status, "active_source": True},
+                    {"power_status": status},
                 )
             finally:
                 await self._close(process)
