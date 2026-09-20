@@ -13,6 +13,20 @@ _AUDIO_STATUS = re.compile(r">> 51:7a:([0-9a-fA-F]{2})")
 _POWER_STATUS = re.compile(r">> 51:90:([0-9a-fA-F]{2})")
 
 
+def logical_to_cec(config: AmplifierConfig, volume: int) -> int:
+    """Map a Music Assistant 1-100 volume onto the safe amplifier range."""
+    logical = max(1, min(100, int(volume)))
+    span = config.volume_max - config.volume_min
+    return round(config.volume_min + ((logical - 1) * span / 99))
+
+
+def cec_to_logical(config: AmplifierConfig, volume: int) -> int:
+    """Map a reported amplifier volume back onto Music Assistant's scale."""
+    cec = max(config.volume_min, min(config.volume_max, int(volume)))
+    span = config.volume_max - config.volume_min
+    return round(1 + ((cec - config.volume_min) * 99 / span))
+
+
 class CecAmplifier:
     """Control and query a CEC audio system through ``cec-client``."""
 
@@ -108,7 +122,7 @@ class CecAmplifier:
     async def set_volume(self, target: int) -> tuple[int, bool]:
         if not self.config.enabled:
             raise RuntimeError("CEC amplifier control is disabled")
-        target = max(0, min(100, int(target)))
+        requested = max(0, min(100, int(target)))
         async with self._lock:
             process = await self._open()
             try:
@@ -118,11 +132,12 @@ class CecAmplifier:
                 muted = bool(status & 0x80)
                 current = status & 0x7F
 
-                if target == 0:
+                if requested == 0:
                     if not muted:
                         await self._send(process, f"tx 1{destination:x}:44:43")
                         await self._send(process, f"tx 1{destination:x}:45")
                 else:
+                    target = logical_to_cec(self.config, requested)
                     if muted:
                         await self._send(process, f"tx 1{destination:x}:44:43")
                         await self._send(process, f"tx 1{destination:x}:45")
@@ -138,11 +153,21 @@ class CecAmplifier:
                 result = await self._read_match(process, _AUDIO_STATUS)
                 volume = result & 0x7F
                 muted = bool(result & 0x80)
-                await self._publish(volume=volume, muted=muted, powered=True)
+                logical_volume = 0 if muted else cec_to_logical(self.config, volume)
+                await self._publish(
+                    volume=logical_volume,
+                    cec_volume=volume,
+                    muted=muted,
+                    powered=True,
+                )
                 await self.events.emit(
                     "amplifier_volume_changed",
-                    {"volume": volume, "muted": muted},
+                    {
+                        "volume": logical_volume,
+                        "cec_volume": volume,
+                        "muted": muted,
+                    },
                 )
-                return volume, muted
+                return logical_volume, muted
             finally:
                 await self._close(process)

@@ -95,6 +95,9 @@ such as vocals sound hollow or phase-cancelled.
   volume exposed by Music Assistant controls the Yamaha's reported absolute
   volume instead of applying software attenuation. The same control path is
   available at `PUT /v1/amplifier/volume` for the hardware encoder.
+  Music Assistant's 1–100 range maps to Yamaha 15–45 by default, reducing CEC
+  traffic and imposing a safe maximum; both endpoints are configurable under
+  `[amplifier]`. Volume 0 mutes the Yamaha.
 
 Priority is phono, then actively streaming Bluetooth, then Music Assistant.
 There is no manual source selector. Level thresholds, debounce, and hold times

@@ -357,6 +357,8 @@ enabled = true
 cec_device = "/dev/cec0"
 logical_address = 5
 wake_on_audio = true
+volume_min = 15
+volume_max = 45
 EOF
 fi
 
@@ -432,6 +434,8 @@ enabled = true
 cec_device = "/dev/cec0"
 logical_address = 5
 wake_on_audio = true
+volume_min = 15
+volume_max = 45
 EOF
 fi
 if [[ -n "$requested_audio_backend" ]]; then

@@ -87,6 +87,8 @@ class AmplifierConfig:
     cec_device: str = "/dev/cec0"
     logical_address: int = 5
     wake_on_audio: bool = True
+    volume_min: int = 15
+    volume_max: int = 45
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,8 @@ def load_config(path: Path) -> Config:
             cec_device=str(amplifier.get("cec_device", "/dev/cec0")),
             logical_address=int(amplifier.get("logical_address", 5)),
             wake_on_audio=bool(amplifier.get("wake_on_audio", True)),
+            volume_min=int(amplifier.get("volume_min", 15)),
+            volume_max=int(amplifier.get("volume_max", 45)),
         ),
     )
     _validate(config)
@@ -276,3 +280,7 @@ def _validate(config: Config) -> None:
         raise ValueError("amplifier.cec_device must be absolute")
     if not 0 <= config.amplifier.logical_address <= 15:
         raise ValueError("amplifier.logical_address must be between 0 and 15")
+    if not 0 <= config.amplifier.volume_min < config.amplifier.volume_max <= 100:
+        raise ValueError(
+            "amplifier volume range must satisfy 0 <= volume_min < volume_max <= 100"
+        )
