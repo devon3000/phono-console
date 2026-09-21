@@ -21,6 +21,7 @@ class DetectionConfig:
     attack_ms: int
     release_ms: int
     hysteresis_db: float
+    needle_drop_peak_dbfs: float = -45.0
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,9 @@ def load_config(path: Path) -> Config:
             attack_ms=int(_required(detection, "attack_ms", "detection")),
             release_ms=int(_required(detection, "release_ms", "detection")),
             hysteresis_db=float(_required(detection, "hysteresis_db", "detection")),
+            needle_drop_peak_dbfs=float(
+                detection.get("needle_drop_peak_dbfs", -45.0)
+            ),
         ),
         music_assistant=MusicAssistantConfig(
             base_url=str(_required(ma, "base_url", "music_assistant")),
@@ -248,6 +252,10 @@ def _validate(config: Config) -> None:
         raise ValueError("detection attack/release times cannot be negative")
     if config.detection.hysteresis_db < 0:
         raise ValueError("detection.hysteresis_db cannot be negative")
+    if not -120 <= config.detection.needle_drop_peak_dbfs <= 0:
+        raise ValueError(
+            "detection.needle_drop_peak_dbfs must be between -120 and 0"
+        )
     if config.bluetooth.attack_ms < 0 or config.bluetooth.release_ms < 0:
         raise ValueError("bluetooth attack/release times cannot be negative")
     if not 10 <= config.bluetooth.pairing_window_seconds <= 600:

@@ -38,3 +38,8 @@ class ActivityDetector:
         """Immediately clear activity when the input measurement is invalid."""
         self.active = False
         self._candidate_since = None
+
+    def force_active(self) -> None:
+        """Latch activity immediately after an independent wake trigger."""
+        self.active = True
+        self._candidate_since = None

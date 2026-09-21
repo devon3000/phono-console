@@ -134,6 +134,27 @@ class Controller:
                 "capture", "ok", "capture is producing PCM"
             )
 
+        latest = getattr(self.level_monitor, "latest", None)
+        peak_level = (
+            max(latest.left.peak_dbfs, latest.right.peak_dbfs)
+            if latest is not None
+            else -120.0
+        )
+        if (
+            capture_ok
+            and not self.detector.active
+            and peak_level >= self.config.detection.needle_drop_peak_dbfs
+        ):
+            self.detector.force_active()
+            await self.event_sink.emit(
+                "phono_needle_drop_detected",
+                {
+                    "peak_dbfs": peak_level,
+                    "threshold_dbfs": (
+                        self.config.detection.needle_drop_peak_dbfs
+                    ),
+                },
+            )
         phono_active = capture_ok and self.detector.update(level, timestamp)
         local_audio_preactivated = False
         output_preactivated = False

@@ -161,6 +161,44 @@ def test_needle_drop_starts_hdmi_before_slow_ma_telemetry() -> None:
     asyncio.run(scenario())
 
 
+def test_needle_drop_peak_wakes_above_noise_without_rms_activity() -> None:
+    class PeakMonitor(SimulatedLevelMonitor):
+        def __init__(self, peak: float) -> None:
+            super().__init__(level=-70.0)
+            channel = ChannelLevel(peak_dbfs=peak, rms_dbfs=-70.0, clipped=False)
+            self.latest = StereoLevel(left=channel, right=channel)
+
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        subject = Controller(
+            config(),
+            PeakMonitor(-44.0),
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            events,
+        )
+        status = await subject.tick(now=1)
+        assert status.route is Route.LOCAL_PHONO
+        assert status.phono_active
+        assert (
+            "phono_needle_drop_detected",
+            {"peak_dbfs": -44.0, "threshold_dbfs": -45.0},
+        ) in events.events
+
+        noise = Controller(
+            config(),
+            PeakMonitor(-54.0),
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+        )
+        noise_status = await noise.tick(now=1)
+        assert noise_status.route is Route.IDLE
+        assert not noise_status.phono_active
+
+    asyncio.run(scenario())
+
+
 def test_controller_activates_local_phono_profile_on_route_entry() -> None:
     async def scenario() -> None:
         level = SimulatedLevelMonitor()

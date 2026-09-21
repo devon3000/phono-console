@@ -27,3 +27,10 @@ def test_hysteresis_avoids_threshold_chatter() -> None:
     subject.update(-40.0, 0.25)
     assert subject.update(-50.0, 1.0)
 
+
+def test_force_active_uses_normal_release_hold() -> None:
+    subject = detector()
+    subject.force_active()
+    assert subject.update(-80.0, 1.0)
+    assert subject.update(-80.0, 5.99)
+    assert not subject.update(-80.0, 6.0)

@@ -8,6 +8,9 @@ detection_window_ms = 100
 
 [detection]
 phono_threshold_dbfs = -48.0
+# A brief stylus impact wakes HDMI before the RMS music detector fires.
+# This remains safely above the observed roughly -54 dBFS input-noise peaks.
+needle_drop_peak_dbfs = -45.0
 # One 100 ms RMS window is enough to catch the needle landing. Keep the
 # route alive long enough to flip a record without cycling HDMI or MA.
 attack_ms = 0
