@@ -105,8 +105,10 @@ such as vocals sound hollow or phase-cancelled.
   available at `PUT /v1/amplifier/volume` for the hardware encoder.
   Music Assistant's 1–100 range maps to Yamaha 15–45 by default, reducing CEC
   traffic and imposing a safe maximum; both endpoints are configurable under
-  `[amplifier]`. Volume 0 mutes the Yamaha. `wake_settle_seconds` delays audio
-  and volume commands after a CEC wake so the receiver can finish starting.
+  `[amplifier]`. Volume 0 mutes the Yamaha. CEC wake uses the configured
+  `physical_address` (HDMI1 is `1.0.0.0`) for Active Source and System Audio
+  Mode handshakes; `wake_settle_seconds` delays volume commands until startup
+  finishes.
   On a cold start, the HDMI PCM route is opened before the CEC wake so the
   receiver sees a live audio stream throughout its HDMI initialization.
   Waking the Yamaha never resets its volume; Music Assistant remains the

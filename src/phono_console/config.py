@@ -87,7 +87,8 @@ class AmplifierConfig:
     cec_device: str = "/dev/cec0"
     logical_address: int = 5
     wake_on_audio: bool = True
-    wake_settle_seconds: float = 4.0
+    physical_address: str = "1.0.0.0"
+    wake_settle_seconds: float = 2.5
     volume_min: int = 15
     volume_max: int = 45
     local_phono_volume: int = 50
@@ -225,7 +226,8 @@ def load_config(path: Path) -> Config:
             cec_device=str(amplifier.get("cec_device", "/dev/cec0")),
             logical_address=int(amplifier.get("logical_address", 5)),
             wake_on_audio=bool(amplifier.get("wake_on_audio", True)),
-            wake_settle_seconds=float(amplifier.get("wake_settle_seconds", 4.0)),
+            physical_address=str(amplifier.get("physical_address", "1.0.0.0")),
+            wake_settle_seconds=float(amplifier.get("wake_settle_seconds", 2.5)),
             volume_min=int(amplifier.get("volume_min", 15)),
             volume_max=int(amplifier.get("volume_max", 45)),
             local_phono_volume=int(amplifier.get("local_phono_volume", 50)),
@@ -284,6 +286,16 @@ def _validate(config: Config) -> None:
         raise ValueError("amplifier.cec_device must be absolute")
     if not 0 <= config.amplifier.logical_address <= 15:
         raise ValueError("amplifier.logical_address must be between 0 and 15")
+    physical_parts = config.amplifier.physical_address.split(".")
+    if len(physical_parts) != 4 or any(
+        len(part) != 1 or part.lower() not in "0123456789abcdef"
+        for part in physical_parts
+    ):
+        raise ValueError(
+            "amplifier.physical_address must contain four hexadecimal nibbles"
+        )
+    if not 0 <= config.amplifier.wake_settle_seconds <= 30:
+        raise ValueError("amplifier.wake_settle_seconds must be between 0 and 30")
     if not 0 <= config.amplifier.volume_min < config.amplifier.volume_max <= 100:
         raise ValueError(
             "amplifier volume range must satisfy 0 <= volume_min < volume_max <= 100"

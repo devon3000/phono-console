@@ -13,6 +13,12 @@ _AUDIO_STATUS = re.compile(r">> 51:7a:([0-9a-fA-F]{2})")
 _POWER_STATUS = re.compile(r">> 51:90:([0-9a-fA-F]{2})")
 
 
+def physical_address_bytes(address: str) -> tuple[int, int]:
+    """Encode a dotted CEC physical address such as 1.0.0.0."""
+    parts = [int(part, 16) for part in address.split(".")]
+    return (parts[0] << 4) | parts[1], (parts[2] << 4) | parts[3]
+
+
 def logical_to_cec(config: AmplifierConfig, volume: int) -> int:
     """Map a Music Assistant 1-100 volume onto the safe amplifier range."""
     logical = max(1, min(100, int(volume)))
@@ -106,7 +112,22 @@ class CecAmplifier:
                 status = await self._read_match(process, _POWER_STATUS, timeout=2)
                 awakened = status != 0
                 if status != 0:
-                    await self._send(process, f"on {self.config.logical_address}")
+                    high, low = physical_address_bytes(
+                        self.config.physical_address
+                    )
+                    # A bare CEC power key leaves the SR-300 awake but without
+                    # HDMI audio or working volume control. Reproduce the TV's
+                    # proper handshake instead: announce the Pi as active, then
+                    # request System Audio Mode for its physical HDMI input.
+                    await self._send(
+                        process, f"tx 1f:82:{high:02x}:{low:02x}"
+                    )
+                    await asyncio.sleep(0.1)
+                    await self._send(
+                        process,
+                        f"tx 1{self.config.logical_address:x}:70:"
+                        f"{high:02x}:{low:02x}",
+                    )
                 deadline = asyncio.get_running_loop().time() + 8
                 while status != 0 and asyncio.get_running_loop().time() < deadline:
                     await self._send(

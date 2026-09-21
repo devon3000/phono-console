@@ -1,4 +1,8 @@
-from phono_console.amplifier import cec_to_logical, logical_to_cec
+from phono_console.amplifier import (
+    cec_to_logical,
+    logical_to_cec,
+    physical_address_bytes,
+)
 from phono_console.config import AmplifierConfig
 
 
@@ -20,3 +24,8 @@ def test_volume_mapping_clamps_values_outside_each_range() -> None:
     assert logical_to_cec(config, 120) == 45
     assert cec_to_logical(config, 5) == 1
     assert cec_to_logical(config, 80) == 100
+
+
+def test_physical_address_encodes_hdmi_input_path() -> None:
+    assert physical_address_bytes("1.0.0.0") == (0x10, 0x00)
+    assert physical_address_bytes("3.2.1.0") == (0x32, 0x10)
