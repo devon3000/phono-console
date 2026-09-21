@@ -2,6 +2,7 @@ import asyncio
 
 from phono_console.bluetooth import (
     BluetoothManager,
+    map_transport_volume,
     parse_player_show,
     parse_transport_paths,
     parse_transport_volume,
@@ -62,6 +63,13 @@ def test_parse_active_a2dp_sink_transport_volume() -> None:
     assert parse_transport_paths(listing) == ["/org/bluez/hci0/dev_AA_BB/fd0"]
     assert parse_transport_volume(details) == 64
     assert parse_transport_volume(details.replace("active", "idle")) is None
+
+
+def test_transport_volume_mapping_compresses_range_and_preserves_mute() -> None:
+    assert map_transport_volume(0, 20, 80) == 0
+    assert map_transport_volume(1, 20, 80) == 20
+    assert map_transport_volume(64, 20, 80) == 50
+    assert map_transport_volume(127, 20, 80) == 80
 
 
 def test_transport_volume_changes_drive_shared_logical_volume() -> None:

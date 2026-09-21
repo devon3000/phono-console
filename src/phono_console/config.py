@@ -34,6 +34,8 @@ class BluetoothConfig:
     adapter: str = "hci0"
     alias: str = "PhonoConsole"
     pairing_window_seconds: int = 120
+    volume_min: int = 20
+    volume_max: int = 80
 
 
 @dataclass(frozen=True)
@@ -179,6 +181,8 @@ def load_config(path: Path) -> Config:
             pairing_window_seconds=int(
                 bluetooth.get("pairing_window_seconds", 120)
             ),
+            volume_min=int(bluetooth.get("volume_min", 20)),
+            volume_max=int(bluetooth.get("volume_max", 80)),
         ),
         routing=RoutingConfig(
             distribution_target=str(
@@ -260,6 +264,10 @@ def _validate(config: Config) -> None:
         raise ValueError("bluetooth attack/release times cannot be negative")
     if not 10 <= config.bluetooth.pairing_window_seconds <= 600:
         raise ValueError("bluetooth.pairing_window_seconds must be between 10 and 600")
+    if not 0 <= config.bluetooth.volume_min < config.bluetooth.volume_max <= 100:
+        raise ValueError(
+            "bluetooth volume range must satisfy 0 <= volume_min < volume_max <= 100"
+        )
     if not config.routing.distribution_target:
         raise ValueError("routing.distribution_target must be non-empty")
     if config.routing.distribution_recovery_hold_ms < 0:

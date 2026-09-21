@@ -46,6 +46,7 @@ class Controller:
         event_sink: EventSink,
         status_sink: StatusSink | None = None,
         bluetooth_monitor: LevelMonitor | None = None,
+        bluetooth_is_playing: Callable[[], bool] | None = None,
         distribution_available: Callable[[], bool | Awaitable[bool]] | None = None,
         distribution_capable: Callable[
             [Source], bool | Awaitable[bool]
@@ -65,6 +66,7 @@ class Controller:
         self.event_sink = event_sink
         self.status_sink = status_sink
         self.bluetooth_monitor = bluetooth_monitor
+        self.bluetooth_is_playing = bluetooth_is_playing
         self.distribution_available = distribution_available
         self.distribution_capable = distribution_capable
         self.prepare_distribution = prepare_distribution
@@ -140,11 +142,12 @@ class Controller:
             if latest is not None
             else -120.0
         )
-        if (
+        needle_drop_detected = bool(
             capture_ok
             and not self.detector.active
             and peak_level >= self.config.detection.needle_drop_peak_dbfs
-        ):
+        )
+        if needle_drop_detected:
             self.detector.force_active()
             await self.event_sink.emit(
                 "phono_needle_drop_detected",
@@ -156,9 +159,22 @@ class Controller:
                 },
             )
         phono_active = capture_ok and self.detector.update(level, timestamp)
+        phono_signal_present = bool(
+            capture_ok
+            and (
+                needle_drop_detected
+                or level
+                >= self.config.detection.phono_threshold_dbfs
+                - (
+                    self.config.detection.hysteresis_db
+                    if self.detector.active
+                    else 0.0
+                )
+            )
+        )
         local_audio_preactivated = False
         output_preactivated = False
-        if phono_active and self.route in {None, Route.IDLE}:
+        if phono_signal_present and self.route in {None, Route.IDLE}:
             # Needle drop is the latency-critical path. Do not hold HDMI PCM
             # and the amplifier wake handshake behind Music Assistant network
             # telemetry; phono has priority in every policy mode, and the
@@ -211,28 +227,40 @@ class Controller:
             self._phono_mode_inactive_since = None
             self._phono_mode_last_refresh = None
         bluetooth_level = -120.0
-        bluetooth_active = False
+        bluetooth_transport_playing = bool(
+            self.bluetooth_is_playing is not None and self.bluetooth_is_playing()
+        )
+        bluetooth_active = bluetooth_transport_playing
         bluetooth_capture_ok = self.bluetooth_monitor is not None
-        if self.bluetooth_monitor is not None and not phono_active:
+        if self.bluetooth_monitor is not None and not phono_signal_present:
             try:
                 bluetooth_level = await asyncio.wait_for(
                     self.bluetooth_monitor.level_dbfs(), timeout=2.0
                 )
             except Exception as exc:
                 bluetooth_capture_ok = False
-                self.bluetooth_detector.reset_inactive()
+                if bluetooth_transport_playing:
+                    self.bluetooth_detector.force_active()
+                else:
+                    self.bluetooth_detector.reset_inactive()
                 await self._set_component("bluetooth_audio", "degraded", str(exc))
             else:
-                bluetooth_active = self.bluetooth_detector.update(
-                    bluetooth_level, timestamp
-                )
+                detected = self.bluetooth_detector.update(bluetooth_level, timestamp)
+                if bluetooth_transport_playing:
+                    self.bluetooth_detector.force_active()
+                bluetooth_active = bluetooth_transport_playing or detected
                 await self._set_component(
                     "bluetooth_audio",
                     "ok",
-                    "streaming" if bluetooth_active else "connected or idle",
+                    (
+                        "streaming"
+                        if bluetooth_active
+                        else "connected or idle"
+                    ),
                     level_dbfs=bluetooth_level,
+                    transport_playing=bluetooth_transport_playing,
                 )
-        elif phono_active:
+        elif phono_signal_present:
             # The timestamped Bluetooth monitor waits for a PCM frame. With no
             # phone streaming that wait reaches its two-second timeout and used
             # to stall phono metering even though phono has higher priority.
@@ -248,8 +276,12 @@ class Controller:
         available = await self._distribution_ready(timestamp)
         selected_source = (
             Source.PHONO
-            if phono_active
-            else (Source.BLUETOOTH if bluetooth_active else Source.NONE)
+            if phono_signal_present
+            else (
+                Source.BLUETOOTH
+                if bluetooth_active
+                else (Source.PHONO if phono_active else Source.NONE)
+            )
         )
         distribution_required = bool(
             selected_source is Source.PHONO
@@ -303,7 +335,11 @@ class Controller:
             self._distribution_pending_since = None
 
         inputs = Inputs(
-            phono_active, bluetooth_active, ma_playing, available, output_mode
+            selected_source is Source.PHONO,
+            selected_source is Source.BLUETOOTH,
+            ma_playing,
+            available,
+            output_mode,
         )
         # Keep direct phono playback alive while MA starts and buffers its
         # return feed. Once distribution becomes available, the router swaps
@@ -329,7 +365,10 @@ class Controller:
                 and not phono_active
             ):
                 desired_route = Route.DISTRIBUTED_BLUETOOTH
-            elif self.route is Route.DISTRIBUTED_PHONO and phono_active:
+            elif (
+                self.route is Route.DISTRIBUTED_PHONO
+                and selected_source is Source.PHONO
+            ):
                 desired_route = Route.DISTRIBUTED_PHONO
         was_distributed = self.route in {
             Route.DISTRIBUTED_PHONO,
@@ -362,8 +401,8 @@ class Controller:
                 self._distribution_healthy_since = None
                 desired_route = choose_route(
                     Inputs(
-                        phono_active,
-                        bluetooth_active,
+                        selected_source is Source.PHONO,
+                        selected_source is Source.BLUETOOTH,
                         ma_playing,
                         False,
                         output_mode,

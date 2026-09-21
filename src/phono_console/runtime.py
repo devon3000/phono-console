@@ -392,6 +392,11 @@ async def run_daemon(config: Config) -> None:
         events,
         status_sink=state,
         bluetooth_monitor=bluetooth_monitor,
+        bluetooth_is_playing=(
+            lambda: bluetooth_manager.playback_status == "playing"
+            if bluetooth_manager is not None
+            else False
+        ),
         distribution_available=distribution_available,
         distribution_capable=distribution_capable,
         prepare_distribution=prepare_distribution,

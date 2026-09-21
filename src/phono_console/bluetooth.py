@@ -102,6 +102,14 @@ def parse_transport_volume(output: str) -> int | None:
     return max(0, min(127, int(match.group(0), 0)))
 
 
+def map_transport_volume(raw_volume: int, minimum: int, maximum: int) -> int:
+    """Compress AVRCP's 1..127 range while preserving zero as mute."""
+    raw = max(0, min(127, int(raw_volume)))
+    if raw == 0:
+        return 0
+    return round(minimum + (raw - 1) * (maximum - minimum) / 126)
+
+
 class BluetoothManager:
     """Supervise one headless BlueZ agent and a time-limited pairing window."""
 
@@ -197,7 +205,9 @@ class BluetoothManager:
         if raw_volume is None or raw_volume == self._last_transport_volume:
             return
         self._last_transport_volume = raw_volume
-        volume = round(raw_volume * 100 / 127)
+        volume = map_transport_volume(
+            raw_volume, self.config.volume_min, self.config.volume_max
+        )
         await self._publish(bluetooth_volume=volume, bluetooth_volume_raw=raw_volume)
         await self.events.emit(
             "bluetooth_volume_changed", {"volume": volume, "raw_volume": raw_volume}

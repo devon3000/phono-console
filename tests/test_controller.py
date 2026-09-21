@@ -318,16 +318,16 @@ def test_active_phono_does_not_wait_for_idle_bluetooth_capture() -> None:
             bluetooth_monitor=bluetooth,
         )
 
-        # Bluetooth is sampled while phono is still inside its attack window.
+        # A live phono signal has priority even while its attack timer settles.
         await subject.tick(now=0)
-        assert bluetooth.calls == 1
+        assert bluetooth.calls == 0
 
         # Once phono owns the route, its meter cadence no longer depends on an
         # idle Bluetooth source producing frames.
         await subject.tick(now=0.25)
         await subject.tick(now=0.50)
         assert subject.route is Route.LOCAL_PHONO
-        assert bluetooth.calls == 1
+        assert bluetooth.calls == 0
 
     asyncio.run(scenario())
 
@@ -357,6 +357,59 @@ def test_requested_distribution_is_prepared_immediately() -> None:
         await subject.tick(now=0.25)
         assert subject.route is Route.DISTRIBUTED_PHONO
         assert prepared == ["phono"]
+
+    asyncio.run(scenario())
+
+
+def test_bluetooth_preempts_phono_release_hold_during_actual_silence() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor(level=-20.0)
+        bluetooth = SimulatedLevelMonitor(level=-120.0)
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+        )
+
+        await subject.tick(now=0)
+        assert subject.route is Route.LOCAL_PHONO
+
+        # Phono remains logically active for the record-flip release hold, but
+        # real Bluetooth PCM should still be detected and take over.
+        phono.level = -120.0
+        bluetooth.level = -20.0
+        await subject.tick(now=1)
+        await subject.tick(now=1.25)
+        assert subject.detector.active
+        assert subject.route is Route.LOCAL_BLUETOOTH
+
+    asyncio.run(scenario())
+
+
+def test_bluetooth_media_playing_activates_route_without_pcm_threshold() -> None:
+    async def scenario() -> None:
+        playing = False
+        bluetooth = SimulatedLevelMonitor(level=-120.0)
+        subject = Controller(
+            config(),
+            SimulatedLevelMonitor(level=-120.0),
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            bluetooth_is_playing=lambda: playing,
+        )
+
+        status = await subject.tick(now=0)
+        assert status.route is Route.IDLE
+
+        playing = True
+        status = await subject.tick(now=0.1)
+        assert status.bluetooth_active
+        assert status.route is Route.LOCAL_BLUETOOTH
 
     asyncio.run(scenario())
 

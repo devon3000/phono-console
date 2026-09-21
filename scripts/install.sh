@@ -395,7 +395,13 @@ release_ms = 2000
 adapter = "hci0"
 alias = "PhonoConsole"
 pairing_window_seconds = 120
+volume_min = 20
+volume_max = 80
 EOF
+fi
+if [[ -z "$(config_value bluetooth volume_min 2>/dev/null || true)" ]]; then
+  sed -i '/^pairing_window_seconds/a volume_min = 20\nvolume_max = 80' \
+    "$CONFIG_FILE"
 fi
 if ! grep -q '^\[routing\]' "$CONFIG_FILE"; then
   cat >>"$CONFIG_FILE" <<EOF

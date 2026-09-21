@@ -26,6 +26,9 @@ release_ms = 2000
 adapter = "hci0"
 alias = "PhonoConsole"
 pairing_window_seconds = 120
+# Compress phone absolute volume into a gentler useful MA/Yamaha range.
+volume_min = 20
+volume_max = 80
 
 [routing]
 distribution_target = "Downstairs"
