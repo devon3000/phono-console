@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+from contextlib import suppress
 
 from music_assistant_models.enums import PlaybackState
 
@@ -13,6 +14,8 @@ class FakePlayer:
     name: str = "Phono Console"
     available: bool = True
     playback_state: PlaybackState = PlaybackState.PLAYING
+    volume_level: int | None = 42
+    group_volume: int | None = None
 
 
 class FakePlayers:
@@ -87,6 +90,28 @@ def test_named_group_volume_is_clamped_and_sent() -> None:
         assert await state.set_group_volume("Phono Console", 120)
         assert client.players.group_volume_calls == [("console-id", 100)]
         assert not await state.set_group_volume("Missing", 50)
+
+    asyncio.run(scenario())
+
+
+def test_console_status_caches_ma_volume_for_route_handoff() -> None:
+    async def scenario() -> None:
+        state = MusicAssistantState(
+            "http://ma", None, "Phono Console", SimulatedEventSink()
+        )
+        client = FakeClient()
+        state._client = client  # type: ignore[assignment]
+        ready = asyncio.Event()
+        ready.set()
+        state._ready = ready
+        state._listener = asyncio.create_task(asyncio.sleep(10))
+        try:
+            assert await state.console_is_playing()
+            assert state.console_volume == 42
+        finally:
+            state._listener.cancel()
+            with suppress(asyncio.CancelledError):
+                await state._listener
 
     asyncio.run(scenario())
 

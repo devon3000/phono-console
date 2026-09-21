@@ -41,6 +41,7 @@ class MusicAssistantState:
         self._next_retry_at = 0.0
         self._retry_seconds = 1.0
         self._last_console_playing = False
+        self._last_console_volume: int | None = None
         self._player_missing_reported = False
 
     async def _publish_state(
@@ -184,12 +185,18 @@ class MusicAssistantState:
         self._last_console_playing = (
             player.playback_state is PlaybackState.PLAYING
         )
+        volume = getattr(player, "volume_level", None)
+        if volume is None:
+            volume = getattr(player, "group_volume", None)
+        if volume is not None:
+            self._last_console_volume = max(0, min(100, int(volume)))
         if self.state is not None:
             await self.state.set_component(
                 "sendspin_player",
                 "ok",
                 "playing" if self._last_console_playing else "ready",
                 player=self.console_player,
+                volume=self._last_console_volume,
             )
         return self._last_console_playing
 
@@ -251,6 +258,11 @@ class MusicAssistantState:
     def console_playing(self) -> bool:
         """Last confirmed playback state of the local Sendspin player."""
         return self._last_console_playing
+
+    @property
+    def console_volume(self) -> int | None:
+        """Last confirmed logical volume of the local Sendspin player."""
+        return self._last_console_volume
 
     async def close(self) -> None:
         if self._connection_task is not None:

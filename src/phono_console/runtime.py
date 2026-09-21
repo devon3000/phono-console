@@ -195,6 +195,18 @@ async def run_daemon(config: Config) -> None:
     async def activate_route(route: Route) -> None:
         if route is Route.LOCAL_PHONO:
             await amplifier.set_volume(local_phono_volume)
+        elif route in {
+            Route.MA_PLAYBACK,
+            Route.DISTRIBUTED_PHONO,
+            Route.DISTRIBUTED_BLUETOOTH,
+        }:
+            # MA may retain the Console player's volume across an idle/local
+            # session and therefore send no new volume hook when playback
+            # resumes. Explicitly conform the Yamaha at the route boundary so
+            # the saved local-phono profile cannot leak into MA playback.
+            ma_volume = music_assistant.console_volume
+            if ma_volume is not None:
+                await amplifier.set_volume(ma_volume)
 
     async def amplifier_volume_action(
         volume: int, source: str
