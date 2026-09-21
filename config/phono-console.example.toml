@@ -8,8 +8,10 @@ detection_window_ms = 100
 
 [detection]
 phono_threshold_dbfs = -48.0
-attack_ms = 250
-release_ms = 5000
+# One 100 ms RMS window is enough to catch the needle landing. Keep the
+# route alive long enough to flip a record without cycling HDMI or MA.
+attack_ms = 0
+release_ms = 180000
 hysteresis_db = 6.0
 
 [bluetooth]

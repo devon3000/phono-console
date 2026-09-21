@@ -134,6 +134,24 @@ class Controller:
                 "capture", "ok", "capture is producing PCM"
             )
 
+        phono_active = capture_ok and self.detector.update(level, timestamp)
+        local_audio_preactivated = False
+        output_preactivated = False
+        if phono_active and self.route in {None, Route.IDLE}:
+            # Needle drop is the latency-critical path. Do not hold HDMI PCM
+            # and the amplifier wake handshake behind Music Assistant network
+            # telemetry; phono has priority in every policy mode, and the
+            # direct route is also the intended bridge while Downstairs starts.
+            try:
+                await self.audio_router.apply(Route.LOCAL_PHONO)
+                local_audio_preactivated = True
+                await self._set_router_component(Route.LOCAL_PHONO)
+                if self.activate_output is not None:
+                    await self.activate_output()
+                    output_preactivated = True
+            except Exception as exc:
+                await self._set_component("local_output", "failed", str(exc))
+
         try:
             ma_playing = await asyncio.wait_for(
                 self.music_assistant.console_is_playing(), timeout=2.0
@@ -144,7 +162,6 @@ class Controller:
             ma_playing = True
             await self._set_component("music_assistant", "degraded", str(exc))
         whole_house = await self.music_assistant.whole_house_is_requested()
-        phono_active = capture_ok and self.detector.update(level, timestamp)
         output_mode = self.phono_output_mode()
         if output_mode is PhonoOutputMode.DOWNSTAIRS:
             if phono_active:
@@ -343,6 +360,7 @@ class Controller:
             desired_route is not Route.IDLE
             and (self.route is None or self.route is Route.IDLE)
             and self.activate_output is not None
+            and not output_preactivated
         )
         try:
             # Reconcile every tick so a child process that dies while the
@@ -350,7 +368,9 @@ class Controller:
             reconciler = getattr(self.audio_router, "reconcile", None)
             if desired_route == self.route and reconciler is not None:
                 await reconciler(desired_route)
-            elif desired_route != self.route:
+            elif desired_route != self.route and not (
+                local_audio_preactivated and desired_route is Route.LOCAL_PHONO
+            ):
                 await self.audio_router.apply(desired_route)
             await self._set_router_component(desired_route)
 

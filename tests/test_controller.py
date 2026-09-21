@@ -112,6 +112,55 @@ def test_controller_starts_hdmi_route_before_waking_amplifier() -> None:
     asyncio.run(scenario())
 
 
+def test_needle_drop_starts_hdmi_before_slow_ma_telemetry() -> None:
+    async def scenario() -> None:
+        class SlowMusicAssistant(SimulatedMusicAssistant):
+            def __init__(self) -> None:
+                super().__init__()
+                self.query_started = asyncio.Event()
+                self.allow_query = asyncio.Event()
+
+            async def console_is_playing(self) -> bool:
+                self.query_started.set()
+                await self.allow_query.wait()
+                return False
+
+        class OrderedRouter(SimulatedAudioRouter):
+            async def apply(self, route: Route) -> None:
+                await super().apply(route)
+                if route is Route.LOCAL_PHONO:
+                    actions.append("audio")
+
+        async def wake() -> None:
+            actions.append("wake")
+
+        base = config()
+        fast_config = replace(
+            base,
+            detection=replace(base.detection, attack_ms=0),
+        )
+        actions: list[str] = []
+        level = SimulatedLevelMonitor(level=-20)
+        ma = SlowMusicAssistant()
+        subject = Controller(
+            fast_config,
+            level,
+            ma,
+            OrderedRouter(),
+            SimulatedEventSink(),
+            activate_output=wake,
+        )
+
+        tick = asyncio.create_task(subject.tick(now=1))
+        await ma.query_started.wait()
+        assert actions == ["audio", "wake"]
+        ma.allow_query.set()
+        await tick
+        assert subject.route is Route.LOCAL_PHONO
+
+    asyncio.run(scenario())
+
+
 def test_controller_activates_local_phono_profile_on_route_entry() -> None:
     async def scenario() -> None:
         level = SimulatedLevelMonitor()
@@ -221,8 +270,9 @@ def test_active_phono_does_not_wait_for_idle_bluetooth_capture() -> None:
         phono = SimulatedLevelMonitor()
         phono.level = -20.0
         bluetooth = CountingBluetoothMonitor()
+        base = config()
         subject = Controller(
-            config(),
+            replace(base, detection=replace(base.detection, attack_ms=250)),
             phono,
             SimulatedMusicAssistant(),
             SimulatedAudioRouter(),
@@ -286,8 +336,9 @@ def test_distribution_is_released_when_source_signal_ends() -> None:
         async def release():
             released.append(True)
 
+        base = config()
         subject = Controller(
-            config(),
+            replace(base, detection=replace(base.detection, release_ms=5000)),
             level,
             SimulatedMusicAssistant(),
             SimulatedAudioRouter(),
