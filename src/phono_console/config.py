@@ -88,7 +88,7 @@ class AmplifierConfig:
     logical_address: int = 5
     wake_on_audio: bool = True
     physical_address: str = "1.0.0.0"
-    wake_settle_seconds: float = 2.5
+    wake_settle_seconds: float = 0.0
     volume_min: int = 15
     volume_max: int = 45
     local_phono_volume: int = 50
@@ -227,7 +227,7 @@ def load_config(path: Path) -> Config:
             logical_address=int(amplifier.get("logical_address", 5)),
             wake_on_audio=bool(amplifier.get("wake_on_audio", True)),
             physical_address=str(amplifier.get("physical_address", "1.0.0.0")),
-            wake_settle_seconds=float(amplifier.get("wake_settle_seconds", 2.5)),
+            wake_settle_seconds=float(amplifier.get("wake_settle_seconds", 0.0)),
             volume_min=int(amplifier.get("volume_min", 15)),
             volume_max=int(amplifier.get("volume_max", 45)),
             local_phono_volume=int(amplifier.get("local_phono_volume", 50)),

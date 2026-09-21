@@ -107,8 +107,9 @@ such as vocals sound hollow or phase-cancelled.
   traffic and imposing a safe maximum; both endpoints are configurable under
   `[amplifier]`. Volume 0 mutes the Yamaha. CEC wake uses the configured
   `physical_address` (HDMI1 is `1.0.0.0`) for Active Source and System Audio
-  Mode handshakes; `wake_settle_seconds` delays volume commands until startup
-  finishes.
+  Mode handshakes. `wake_settle_seconds` can delay volume restoration if a
+  receiver requires it; the tested SR-300 default is zero because its power
+  confirmation already tracks hardware readiness.
   On a cold start, the HDMI PCM route is opened before the CEC wake so the
   receiver sees a live audio stream throughout its HDMI initialization.
   The daemon keeps one prewarmed CEC session open, avoiding the multi-second
