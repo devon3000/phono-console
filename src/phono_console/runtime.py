@@ -218,6 +218,13 @@ async def run_daemon(config: Config) -> None:
                 return
             phono_downstairs_marker.unlink(missing_ok=True)
             await state.set_phono_output_mode(PhonoOutputMode.LOCAL)
+            # source.stop makes Local authoritative, not merely cosmetic.
+            # Otherwise the next phono signal can line-sense auto-start the
+            # previous MA target while the dashboard still says Console.
+            if publisher is not None:
+                await publisher.set_source_distribution_enabled(
+                    Source.PHONO, False
+                )
             await events.emit(
                 "phono_output_mode_changed",
                 {"mode": PhonoOutputMode.LOCAL.value, "source": "music_assistant_stop"},

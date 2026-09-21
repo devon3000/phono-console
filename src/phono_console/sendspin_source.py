@@ -320,6 +320,27 @@ class SendspinSourcePublisher:
     async def _handle_server_command(self, command: str) -> None:
         async with self._command_lock:
             await self.events.emit("sendspin_source_command", {"command": command})
+            distribution_allowed = bool(
+                self._distribution_enabled
+                and self._source_distribution_enabled.get(
+                    self._selected_source, False
+                )
+            )
+            if command == "start" and not distribution_allowed:
+                # Music Assistant can deliver a delayed source.start while a
+                # previous distributed session is being torn down. Local
+                # mode is authoritative: never reopen capture and broadcast
+                # behind the dashboard's back.
+                await self._send_signal(False)
+                await self._stop_streaming()
+                await self.events.emit(
+                    "sendspin_source_start_ignored",
+                    {
+                        "source": self._selected_source.value,
+                        "reason": "distribution_disabled",
+                    },
+                )
+                return
             if self._selected_source is Source.BLUETOOTH and self._bluetooth_media:
                 if command == "start":
                     self._bluetooth_pause_latched = False

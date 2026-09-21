@@ -174,6 +174,28 @@ def test_server_commands_start_and_stop_the_capture_stream() -> None:
     asyncio.run(scenario())
 
 
+def test_server_start_is_ignored_when_selected_source_distribution_is_disabled() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        publisher, events, state = make_publisher(client)
+        publisher._client = client
+        publisher._connected = True
+
+        await publisher.set_source_distribution_enabled(Source.PHONO, False)
+        await publisher._handle_server_command("start")
+
+        assert client.captures == []
+        assert state.sendspin_source["streaming"] is False
+        assert state.sendspin_source["stream_requested"] is False
+        assert any(
+            name == "sendspin_source_start_ignored"
+            and payload["source"] == "phono"
+            for name, payload in events.events
+        )
+
+    asyncio.run(scenario())
+
+
 def test_rapid_stop_start_commands_do_not_overlap_capture_cleanup() -> None:
     class BlockingStopCapture(FakeCapture):
         def __init__(self) -> None:
