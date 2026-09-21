@@ -97,7 +97,13 @@ class CecAmplifier:
 
     async def _publish(self, **details: object) -> None:
         await self.state.set_component(
-            "amplifier", "ok", "CEC connected", **details
+            "amplifier",
+            "ok",
+            "CEC connected",
+            enabled=self.config.enabled,
+            wake_on_audio=self.config.wake_on_audio,
+            physical_address=self.config.physical_address,
+            **details,
         )
 
     async def power_on(self) -> None:

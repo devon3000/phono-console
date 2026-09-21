@@ -135,12 +135,35 @@ function renderConnections(data) {
   const capture = components.capture || {};
   const output = components.local_output || {};
   const player = components.sendspin_player || {};
+  const amplifier = components.amplifier || {};
   setDot("health-dot", Boolean(health.operational), health.status === "degraded");
   byId("health-status").textContent = health.operational ? "Operational" : "Degraded";
   setDot("capture-dot", capture.status === "ok", capture.status === "degraded");
   byId("capture-status").textContent = capture.message || "Unknown";
   setDot("output-dot", output.status === "ok", output.status === "degraded");
   byId("output-status").textContent = output.message || "Unknown";
+  const yamahaDot = byId("yamaha-dot");
+  yamahaDot.className = `status-dot ${
+    amplifier.status === "failed"
+      ? "offline"
+      : amplifier.powered === true
+      ? "on"
+      : amplifier.powered == null
+      ? "warn"
+      : ""
+  }`;
+  byId("yamaha-status").textContent = amplifier.message || "Unknown";
+  byId("yamaha-power").textContent = amplifier.powered === true
+    ? "On · last confirmed"
+    : amplifier.powered === false
+    ? "Standby · last confirmed"
+    : "Not queried";
+  byId("yamaha-volume").textContent = amplifier.volume != null && Number.isFinite(Number(amplifier.volume))
+    ? `${amplifier.muted ? "Muted" : `${Number(amplifier.volume)}%`} · Yamaha ${amplifier.cec_volume ?? "—"}`
+    : "Not queried";
+  byId("yamaha-wake").textContent = amplifier.wake_on_audio
+    ? `Automatic · HDMI ${amplifier.physical_address || "—"}`
+    : "Manual power";
   setDot("player-dot", player.status === "ok", player.status === "degraded");
   byId("player-status").textContent = player.message || "Unknown";
   setDot("ma-dot", Boolean(ma.connected));

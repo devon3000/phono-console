@@ -418,6 +418,17 @@ async def run_daemon(config: Config) -> None:
         "degraded" if config.sendspin.source_enabled else "ok",
         "connecting" if config.sendspin.source_enabled else "disabled",
     )
+    await state.set_component(
+        "amplifier",
+        "ok",
+        "Ready; state not queried" if config.amplifier.enabled else "Disabled",
+        enabled=config.amplifier.enabled,
+        powered=None,
+        wake_on_audio=config.amplifier.wake_on_audio,
+        physical_address=config.amplifier.physical_address,
+        volume=None,
+        muted=None,
+    )
     await state.set_music_assistant_state(
         {
             "connected": False,

@@ -198,6 +198,7 @@ button:disabled { cursor: wait; opacity: .45; }
 .info-panel { min-height: 230px; padding: 22px; }
 .info-panel dl { margin: 17px 0 0; }
 .info-panel dl div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #202723; }
+.info-panel dl .equipment-divider { margin-top: 7px; border-top: 1px solid rgba(243, 185, 95, .32); }
 .info-panel dt { color: var(--muted); font-size: 12px; }
 .info-panel dd { display: flex; align-items: center; gap: 8px; margin: 0; max-width: 62%; overflow: hidden; text-overflow: ellipsis; font-size: 12px; white-space: nowrap; }
 .info-panel dd.pairing-token { display: block; overflow-wrap: anywhere; white-space: normal; font: 8px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }

@@ -44,6 +44,8 @@ def test_dashboard_assets_are_public_but_live_data_is_authenticated() -> None:
             response = await client.get("/assets/dashboard.js")
             assert response.status == 200
             assert 'api("/v1/status")' in await response.text()
+            response = await client.get("/")
+            assert "Yamaha SR-300" in await response.text()
             response = await client.get("/v1/status")
             assert response.status == 401
         finally:
