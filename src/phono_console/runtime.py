@@ -384,6 +384,19 @@ async def run_daemon(config: Config) -> None:
         # once per minute while a record is active (enforced by Controller).
         phono_downstairs_marker.touch()
 
+    async def inherit_distributed_phono_mode() -> None:
+        phono_downstairs_marker.touch()
+        await state.set_phono_output_mode(PhonoOutputMode.DOWNSTAIRS)
+        if publisher is not None:
+            await publisher.set_source_distribution_enabled(Source.PHONO, True)
+        await events.emit(
+            "phono_output_mode_changed",
+            {
+                "mode": PhonoOutputMode.DOWNSTAIRS.value,
+                "source": "inherited_bluetooth_distribution",
+            },
+        )
+
     controller = Controller(
         config,
         monitor,
@@ -406,6 +419,7 @@ async def run_daemon(config: Config) -> None:
         phono_output_mode=lambda: state.phono_output_mode,
         expire_phono_output_mode=expire_phono_output_mode,
         refresh_phono_output_mode=refresh_phono_output_mode,
+        inherit_distributed_phono_mode=inherit_distributed_phono_mode,
         activate_output=amplifier.power_on,
         activate_route=activate_route,
     )

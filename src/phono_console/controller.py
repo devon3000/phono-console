@@ -56,6 +56,7 @@ class Controller:
         phono_output_mode: Callable[[], PhonoOutputMode] | None = None,
         expire_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
         refresh_phono_output_mode: Callable[[], Awaitable[None]] | None = None,
+        inherit_distributed_phono_mode: Callable[[], Awaitable[None]] | None = None,
         activate_output: Callable[[], Awaitable[None]] | None = None,
         activate_route: Callable[[Route], Awaitable[None]] | None = None,
     ) -> None:
@@ -74,6 +75,7 @@ class Controller:
         self.phono_output_mode = phono_output_mode or (lambda: PhonoOutputMode.LOCAL)
         self.expire_phono_output_mode = expire_phono_output_mode
         self.refresh_phono_output_mode = refresh_phono_output_mode
+        self.inherit_distributed_phono_mode = inherit_distributed_phono_mode
         self.activate_output = activate_output
         self.activate_route = activate_route
         self._phono_mode_inactive_since: float | None = None
@@ -199,6 +201,16 @@ class Controller:
             ma_playing = True
             await self._set_component("music_assistant", "degraded", str(exc))
         whole_house = await self.music_assistant.whole_house_is_requested()
+        if (
+            phono_signal_present
+            and self.route is Route.DISTRIBUTED_BLUETOOTH
+            and self.inherit_distributed_phono_mode is not None
+        ):
+            # A newly selected physical source inherits the current listening
+            # path. Starting a record while Bluetooth is already downstairs
+            # should replace that distributed source, not collapse playback
+            # back to the cabinet. Local Bluetooth still becomes local phono.
+            await self.inherit_distributed_phono_mode()
         output_mode = self.phono_output_mode()
         if output_mode is PhonoOutputMode.DOWNSTAIRS:
             if phono_active:

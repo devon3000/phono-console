@@ -414,6 +414,83 @@ def test_bluetooth_media_playing_activates_route_without_pcm_threshold() -> None
     asyncio.run(scenario())
 
 
+def test_phono_inherits_distributed_bluetooth_output_path() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor(level=-120.0)
+        bluetooth = SimulatedLevelMonitor(level=-20.0)
+        output_mode = PhonoOutputMode.LOCAL
+        inherited = 0
+        prepared = []
+
+        async def inherit() -> None:
+            nonlocal output_mode, inherited
+            output_mode = PhonoOutputMode.DOWNSTAIRS
+            inherited += 1
+
+        async def prepare(source):
+            prepared.append(source.value)
+            return True
+
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            distribution_available=lambda: True,
+            distribution_capable=lambda _source: True,
+            prepare_distribution=prepare,
+            phono_output_mode=lambda: output_mode,
+            inherit_distributed_phono_mode=inherit,
+        )
+
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+
+        phono.level = -20.0
+        await subject.tick(now=0.5)
+        assert inherited == 1
+        assert output_mode is PhonoOutputMode.DOWNSTAIRS
+        assert subject.route is Route.DISTRIBUTED_PHONO
+        assert prepared[-1] == "phono"
+
+    asyncio.run(scenario())
+
+
+def test_phono_inherits_local_bluetooth_output_path_without_promotion() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor(level=-120.0)
+        bluetooth = SimulatedLevelMonitor(level=-20.0)
+        inherited = 0
+
+        async def inherit() -> None:
+            nonlocal inherited
+            inherited += 1
+
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            inherit_distributed_phono_mode=inherit,
+        )
+
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.LOCAL_BLUETOOTH
+
+        phono.level = -20.0
+        await subject.tick(now=0.5)
+        assert inherited == 0
+        assert subject.route is Route.LOCAL_PHONO
+
+    asyncio.run(scenario())
+
+
 def test_distribution_is_released_when_source_signal_ends() -> None:
     async def scenario() -> None:
         level = SimulatedLevelMonitor()
