@@ -51,6 +51,9 @@ class TimestampedBluetoothBackend:
             config.audio.sample_rate,
             config.audio.channels,
             events,
+            max_soft_correction_ppm=(
+                config.audio_engine.max_soft_correction_ppm
+            ),
         )
         return cls(client, monitor, playback, replay_frames)
 

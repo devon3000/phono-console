@@ -100,3 +100,17 @@ def test_local_playback_feeds_pcm_and_stops_cleanly() -> None:
         ]
 
     asyncio.run(scenario())
+
+
+def test_local_playback_caps_async_correction_to_configured_ppm() -> None:
+    playback = TimestampedLocalPlayback(
+        lambda: None,  # type: ignore[arg-type]
+        "test_output",
+        48_000,
+        2,
+        FakeEvents(),
+        max_soft_correction_ppm=250,
+    )
+
+    assert playback.max_soft_correction_ppm == 250
+    assert playback.async_samples_per_second == 12

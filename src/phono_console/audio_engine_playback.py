@@ -38,6 +38,7 @@ class TimestampedLocalPlayback:
         channels: int,
         events: EventSink,
         *,
+        max_soft_correction_ppm: int = 250,
         process_factory: PlaybackProcessFactory | None = None,
     ) -> None:
         self._frames = frames
@@ -45,13 +46,26 @@ class TimestampedLocalPlayback:
         self.sample_rate = sample_rate
         self.channels = channels
         self.events = events
+        self.max_soft_correction_ppm = max_soft_correction_ppm
         self._process_factory = process_factory or self._start_ffmpeg
         self._process: PlaybackProcess | None = None
         self._pump_task: asyncio.Task[None] | None = None
         self._last_error: str | None = None
         self._started_at: float | None = None
 
+    @property
+    def async_samples_per_second(self) -> int:
+        return max(
+            1,
+            round(self.sample_rate * self.max_soft_correction_ppm / 1_000_000),
+        )
+
     async def _start_ffmpeg(self) -> PlaybackProcess:
+        # FFmpeg's ``async`` value is the maximum number of samples per second
+        # that aresample may stretch or squeeze. The previous value of 1000 at
+        # 48 kHz allowed about 2% pitch/speed modulation. Convert the intended
+        # ppm clock-correction ceiling into samples/second instead (250 ppm at
+        # 48 kHz is 12 samples/second).
         return await asyncio.create_subprocess_exec(
             "ffmpeg",
             "-hide_banner",
@@ -66,7 +80,10 @@ class TimestampedLocalPlayback:
             "-i",
             "pipe:0",
             "-af",
-            f"aresample={self.sample_rate}:async=1000",
+            (
+                f"aresample={self.sample_rate}:"
+                f"async={self.async_samples_per_second}"
+            ),
             "-ar",
             str(self.sample_rate),
             "-ac",
