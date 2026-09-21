@@ -43,9 +43,12 @@ class CecAmplifier:
         self.events = events
         self.state = state
         self._lock = asyncio.Lock()
+        self._process: asyncio.subprocess.Process | None = None
 
     async def _open(self) -> asyncio.subprocess.Process:
-        return await asyncio.create_subprocess_exec(
+        if self._process is not None and self._process.returncode is None:
+            return self._process
+        self._process = await asyncio.create_subprocess_exec(
             "cec-client",
             "-d",
             "8",
@@ -54,6 +57,26 @@ class CecAmplifier:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
+        return self._process
+
+    async def start(self) -> None:
+        """Prewarm the persistent CEC session before audio is detected."""
+        if not self.config.enabled:
+            return
+        async with self._lock:
+            await self._open()
+
+    async def close(self) -> None:
+        """Close the persistent CEC session."""
+        async with self._lock:
+            process, self._process = self._process, None
+            if process is not None:
+                await self._close(process)
+
+    async def _invalidate(self, process: asyncio.subprocess.Process) -> None:
+        if self._process is process:
+            self._process = None
+        await self._close(process)
 
     @staticmethod
     async def _send(process: asyncio.subprocess.Process, command: str) -> None:
@@ -153,8 +176,9 @@ class CecAmplifier:
                     "amplifier_power_on",
                     {"power_status": status, "awakened": awakened},
                 )
-            finally:
-                await self._close(process)
+            except Exception:
+                await self._invalidate(process)
+                raise
 
     async def set_volume(self, target: int) -> tuple[int, bool]:
         if not self.config.enabled:
@@ -206,5 +230,6 @@ class CecAmplifier:
                     },
                 )
                 return logical_volume, muted
-            finally:
-                await self._close(process)
+            except Exception:
+                await self._invalidate(process)
+                raise

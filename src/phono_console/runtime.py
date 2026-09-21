@@ -429,6 +429,7 @@ async def run_daemon(config: Config) -> None:
         volume=None,
         muted=None,
     )
+    await amplifier.start()
     await state.set_music_assistant_state(
         {
             "connected": False,
@@ -558,6 +559,7 @@ async def run_daemon(config: Config) -> None:
             tasks.append(publisher.run(stop))
         await asyncio.gather(*tasks)
     finally:
+        await amplifier.close()
         await runner.cleanup()
         await events.emit("daemon_stopped", {})
 

@@ -111,6 +111,8 @@ such as vocals sound hollow or phase-cancelled.
   finishes.
   On a cold start, the HDMI PCM route is opened before the CEC wake so the
   receiver sees a live audio stream throughout its HDMI initialization.
+  The daemon keeps one prewarmed CEC session open, avoiding the multi-second
+  `cec-client` startup cost on needle drop and subsequent volume changes.
   Waking the Yamaha never resets its volume; Music Assistant remains the
   authority for group-member levels and their relative balance.
   Local phono has a separate persistent logical-volume profile (50 by default),
