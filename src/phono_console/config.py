@@ -63,6 +63,8 @@ class SendspinConfig:
     source_name: str
     source_enabled: bool = False
     state_dir: str = "/var/lib/phono-console/source"
+    phono_gain_db: float = 6.0
+    bluetooth_gain_db: float = 6.0
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,8 @@ def load_config(path: Path) -> Config:
             state_dir=str(
                 sendspin.get("state_dir", "/var/lib/phono-console/source")
             ),
+            phono_gain_db=float(sendspin.get("phono_gain_db", 6.0)),
+            bluetooth_gain_db=float(sendspin.get("bluetooth_gain_db", 6.0)),
         ),
         bluetooth=BluetoothConfig(
             enabled=bool(bluetooth.get("enabled", False)),
@@ -284,6 +288,10 @@ def _validate(config: Config) -> None:
         raise ValueError("music_assistant.whole_house_players entries must be non-empty")
     if config.sendspin.source_enabled and not config.sendspin.state_dir:
         raise ValueError("sendspin.state_dir is required when source_enabled is true")
+    if not -24.0 <= config.sendspin.phono_gain_db <= 24.0:
+        raise ValueError("sendspin.phono_gain_db must be between -24 and 24")
+    if not -24.0 <= config.sendspin.bluetooth_gain_db <= 24.0:
+        raise ValueError("sendspin.bluetooth_gain_db must be between -24 and 24")
     if config.audio_engine.backend not in {"legacy", "timestamped"}:
         raise ValueError("audio_engine.backend must be legacy or timestamped")
     if not config.audio_engine.socket_path.startswith("/"):

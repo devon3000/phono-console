@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import sys
+from array import array
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
@@ -34,6 +37,22 @@ SIGNAL_RELEASE_SECONDS = 1.0
 PcmStreamFactory = Callable[[], AsyncIterator[bytes | TimestampedPcm]]
 ClientFactory = Callable[[], Awaitable[object]]
 SourceStopAction = Callable[[Source], Awaitable[None]]
+
+
+def apply_gain_s16le(pcm: bytes, gain_db: float) -> bytes:
+    """Apply gain to signed 16-bit PCM with saturation instead of wraparound."""
+    if not pcm or gain_db == 0:
+        return pcm
+    samples = array("h")
+    samples.frombytes(pcm)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    factor = math.pow(10.0, gain_db / 20.0)
+    for index, sample in enumerate(samples):
+        samples[index] = max(-32768, min(32767, round(sample * factor)))
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return samples.tobytes()
 
 
 class BluetoothMedia(Protocol):
@@ -421,6 +440,11 @@ class SendspinSourcePublisher:
         capture_anchor_us: int | None = None
         captured_frames = 0
         frame_stride = self.audio.channels * 2
+        gain_db = (
+            self.config.bluetooth_gain_db
+            if self._selected_source is Source.BLUETOOTH
+            else self.config.phono_gain_db
+        )
         try:
             async for chunk in stream:
                 if isinstance(chunk, TimestampedPcm):
@@ -428,13 +452,13 @@ class SendspinSourcePublisher:
                         raise CaptureUnavailable(
                             "timestamped source capture crossed a discontinuity"
                         )
-                    pcm = chunk.pcm
+                    pcm = apply_gain_s16le(chunk.pcm, gain_db)
                     timestamp_us = chunk.first_sample_time_us
                     frames = chunk.frames
                     await capture.feed(pcm, capture_timestamp_us=timestamp_us)
                     captured_frames += frames
                     continue
-                pcm = chunk
+                pcm = apply_gain_s16le(chunk, gain_db)
                 frames = len(pcm) // frame_stride
                 if capture_anchor_us is None:
                     client = self._client

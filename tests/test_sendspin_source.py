@@ -1,11 +1,12 @@
 import asyncio
-from dataclasses import dataclass, field
+from array import array
+from dataclasses import dataclass, field, replace
 
 from phono_console.config import AudioConfig, SendspinConfig
 from phono_console.controller import Status
 from phono_console.audio_engine_protocol import AudioSource, FrameFlags, TimestampedPcm
 from phono_console.policy import Route, Source
-from phono_console.sendspin_source import SendspinSourcePublisher
+from phono_console.sendspin_source import SendspinSourcePublisher, apply_gain_s16le
 from phono_console.simulation import SimulatedEventSink
 from phono_console.state import StateStore
 
@@ -119,6 +120,47 @@ async def finite_pcm():
 async def three_pcm_chunks():
     for _ in range(3):
         yield b"\x00\x00" * 2 * 960
+
+
+def test_pcm_gain_amplifies_and_saturates_without_wrapping() -> None:
+    samples = array("h", [1000, -1000, 20000, -20000])
+    boosted = array("h")
+    boosted.frombytes(apply_gain_s16le(samples.tobytes(), 6.0))
+    assert boosted[0] == 1995
+    assert boosted[1] == -1995
+    assert boosted[2] == 32767
+    assert boosted[3] == -32768
+
+
+def test_publisher_applies_source_specific_gain() -> None:
+    async def pcm():
+        yield array("h", [1000, -1000]).tobytes()
+
+    async def scenario() -> None:
+        settings = replace(
+            SENDSPIN, phono_gain_db=6.0, bluetooth_gain_db=-6.0
+        )
+        publisher = SendspinSourcePublisher(
+            settings,
+            AUDIO,
+            SimulatedEventSink(),
+            StateStore(),
+            pcm_stream_factory=pcm,
+        )
+        phono_capture = FakeCapture()
+        await publisher._pump(phono_capture)
+        phono = array("h")
+        phono.frombytes(phono_capture.fed[0])
+        assert list(phono) == [1995, -1995]
+
+        publisher._selected_source = Source.BLUETOOTH
+        bluetooth_capture = FakeCapture()
+        await publisher._pump(bluetooth_capture)
+        bluetooth = array("h")
+        bluetooth.frombytes(bluetooth_capture.fed[0])
+        assert list(bluetooth) == [501, -501]
+
+    asyncio.run(scenario())
 
 
 def make_publisher(client: FakeClient, state: StateStore | None = None):

@@ -345,6 +345,8 @@ player_name = "$(toml_escape "$ma_player")"
 source_name = "$(toml_escape "$vinyl_source")"
 source_enabled = true
 state_dir = "/var/lib/phono-console/source"
+phono_gain_db = 6.0
+bluetooth_gain_db = 6.0
 
 [runtime]
 poll_interval_ms = 100
@@ -363,6 +365,12 @@ volume_min = 15
 volume_max = 45
 local_phono_volume = 50
 EOF
+
+fi
+
+if [[ -z "$(config_value sendspin phono_gain_db 2>/dev/null || true)" ]]; then
+  sed -i '/^state_dir = "\/var\/lib\/phono-console\/source"/a phono_gain_db = 6.0\nbluetooth_gain_db = 6.0' \
+    "$CONFIG_FILE"
 fi
 
 # Preserved configurations may still name raw hardware (or the legacy null
