@@ -112,28 +112,24 @@ class CecAmplifier:
         async with self._lock:
             process = await self._open()
             try:
-                await self._send(
-                    process, f"tx 1{self.config.logical_address:x}:8f"
+                high, low = physical_address_bytes(
+                    self.config.physical_address
                 )
-                status = await self._read_match(process, _POWER_STATUS, timeout=2)
-                awakened = status != 0
-                if status != 0:
-                    high, low = physical_address_bytes(
-                        self.config.physical_address
-                    )
-                    # A bare CEC power key leaves the SR-300 awake but without
-                    # HDMI audio or working volume control. Reproduce the TV's
-                    # proper handshake instead: announce the Pi as active, then
-                    # request System Audio Mode for its physical HDMI input.
-                    await self._send(
-                        process, f"tx 1f:82:{high:02x}:{low:02x}"
-                    )
-                    await asyncio.sleep(0.1)
-                    await self._send(
-                        process,
-                        f"tx 1{self.config.logical_address:x}:70:"
-                        f"{high:02x}:{low:02x}",
-                    )
+                # Do not query power first. Starting cec-client and waiting for
+                # that preflight reply delayed the visible wake by several
+                # seconds. The TV-style handshake is safe and useful whether
+                # the receiver is in standby or already on.
+                await self._send(
+                    process, f"tx 1f:82:{high:02x}:{low:02x}"
+                )
+                await asyncio.sleep(0.1)
+                await self._send(
+                    process,
+                    f"tx 1{self.config.logical_address:x}:70:"
+                    f"{high:02x}:{low:02x}",
+                )
+                awakened = True
+                status = 1
                 deadline = asyncio.get_running_loop().time() + 8
                 while status != 0 and asyncio.get_running_loop().time() < deadline:
                     await self._send(
@@ -148,8 +144,8 @@ class CecAmplifier:
                 # front-panel volume controller are actually ready. Sending
                 # volume keys or opening the ALSA route during that interval
                 # can leave it in a half-awake state until it is power-cycled.
-                # Only delay after a real wake; an already-on amplifier remains
-                # instant.
+                # Hold volume restoration until the Yamaha's control plane is
+                # ready. HDMI PCM is already flowing during this delay.
                 if awakened and status == 0:
                     await asyncio.sleep(self.config.wake_settle_seconds)
                 await self._publish(powered=status == 0, awakened=awakened)
