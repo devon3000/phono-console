@@ -276,6 +276,8 @@ def _validate(config: Config) -> None:
         raise ValueError(
             "bluetooth volume range must satisfy 0 <= volume_min < volume_max <= 100"
         )
+    if not 0.25 <= config.bluetooth.volume_curve <= 2.0:
+        raise ValueError("bluetooth.volume_curve must be between 0.25 and 2.0")
     if not -12.0 <= config.sendspin.limiter_ceiling_dbfs <= 0.0:
         raise ValueError("sendspin.limiter_ceiling_dbfs must be between -12 and 0")
     if not 20 <= config.sendspin.limiter_release_ms <= 5000:
