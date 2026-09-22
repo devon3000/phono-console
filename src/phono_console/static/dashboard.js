@@ -1,9 +1,6 @@
 "use strict";
 
 const byId = (id) => document.getElementById(id);
-const tokenDialog = byId("token-dialog");
-const tokenForm = byId("token-form");
-let apiToken = sessionStorage.getItem("phono-console-token") || "";
 let pollTimer = null;
 let requestActive = false;
 
@@ -18,7 +15,6 @@ const routeLabels = {
 
 function headers(json = false) {
   const value = {};
-  if (apiToken) value.Authorization = `Bearer ${apiToken}`;
   if (json) value["Content-Type"] = "application/json";
   return value;
 }
@@ -29,21 +25,11 @@ async function api(path, options = {}) {
     cache: "no-store",
     headers: {...headers(Boolean(options.body)), ...(options.headers || {})},
   });
-  if (response.status === 401) {
-    showTokenDialog();
-    throw new Error("Authentication required");
-  }
   if (!response.ok) {
     const detail = (await response.text()).trim();
     throw new Error(detail || `Request failed (${response.status})`);
   }
   return response.json();
-}
-
-function showTokenDialog(message = "") {
-  byId("token-error").textContent = message;
-  if (!tokenDialog.open) tokenDialog.showModal();
-  setTimeout(() => byId("token-input").focus(), 0);
 }
 
 function setDot(id, on, pending = false) {
@@ -283,34 +269,18 @@ async function bluetoothMedia(command) {
 }
 
 async function poll() {
-  if (requestActive || tokenDialog.open) return;
+  if (requestActive) return;
   requestActive = true;
   try {
     render(await api("/v1/status"));
   } catch (error) {
-    if (!tokenDialog.open) {
-      setDot("live-dot", false);
-      byId("live-label").textContent = "OFFLINE";
-    }
+    setDot("live-dot", false);
+    byId("live-label").textContent = "OFFLINE";
   } finally {
     requestActive = false;
   }
 }
 
-
-tokenForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  apiToken = byId("token-input").value.trim();
-  try {
-    const data = await api("/v1/status");
-    sessionStorage.setItem("phono-console-token", apiToken);
-    byId("token-error").textContent = "";
-    tokenDialog.close();
-    render(data);
-  } catch (error) {
-    byId("token-error").textContent = "That token was not accepted.";
-  }
-});
 
 byId("reset-levels").addEventListener("click", async () => {
   try {
