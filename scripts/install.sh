@@ -352,7 +352,6 @@ bluetooth_gain_db = 6.0
 poll_interval_ms = 100
 api_host = "0.0.0.0"
 api_port = 8765
-api_token_env = "PHONO_CONSOLE_API_TOKEN"
 
 [amplifier]
 enabled = true
@@ -546,25 +545,11 @@ if [[ ! -e "$ENV_FILE" ]]; then
   cat >"$ENV_FILE" <<'EOF'
 # Add the Music Assistant token if the server requires one.
 PHONO_CONSOLE_MA_TOKEN=
-PHONO_CONSOLE_API_TOKEN=
 EOF
 fi
 chown root:phono-console "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
 
-api_token="$(awk -F= '$1 == "PHONO_CONSOLE_API_TOKEN" {
-  print substr($0, index($0, "=") + 1)
-}' "$ENV_FILE" | tail -1)"
-if [[ -z "$api_token" ]]; then
-  api_token="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-  if grep -q '^PHONO_CONSOLE_API_TOKEN=' "$ENV_FILE"; then
-    sed -i "s|^PHONO_CONSOLE_API_TOKEN=.*$|PHONO_CONSOLE_API_TOKEN=$api_token|" \
-      "$ENV_FILE"
-  else
-    printf 'PHONO_CONSOLE_API_TOKEN=%s\n' "$api_token" >>"$ENV_FILE"
-  fi
-  echo "Generated a Home Assistant API token in $ENV_FILE"
-fi
 
 echo
 echo "Validating configuration..."
@@ -607,7 +592,6 @@ healthy=false
 healthy_count=0
 for _attempt in $(seq 1 30); do
   if curl --fail --silent \
-    -H "Authorization: Bearer $api_token" \
     "http://127.0.0.1:8765/health/live" >/dev/null; then
     healthy_count=$((healthy_count + 1))
     if (( healthy_count >= 3 )); then
