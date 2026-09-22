@@ -370,18 +370,28 @@ class Controller:
         # Keep the active distributed path latched, while still allowing the
         # higher-priority phono input to preempt Bluetooth and Bluetooth to
         # take over after phono has genuinely released.
-        if available:
-            if (
-                self.route is Route.DISTRIBUTED_BLUETOOTH
-                and bluetooth_active
-                and not phono_active
-            ):
-                desired_route = Route.DISTRIBUTED_BLUETOOTH
-            elif (
-                self.route is Route.DISTRIBUTED_PHONO
-                and selected_source is Source.PHONO
-            ):
-                desired_route = Route.DISTRIBUTED_PHONO
+        # A Sendspin stop/start handshake can make MA's player telemetry false
+        # for a single tick even though the Bluetooth transport is still
+        # playing and the distributed session is immediately returning.  Do
+        # not tear down only the console's MA-return loopback during that
+        # transient: the other group members keep their streams, so reopening
+        # the console loopback later gives it a new buffer position and leaves
+        # the cabinet audibly behind the group.  Bluetooth transport state is
+        # authoritative during this brief control-plane gap.  A real MA Stop
+        # still pauses Bluetooth, after which bluetooth_active releases the
+        # route normally.
+        if (
+            self.route is Route.DISTRIBUTED_BLUETOOTH
+            and bluetooth_active
+            and not phono_active
+        ):
+            desired_route = Route.DISTRIBUTED_BLUETOOTH
+        elif (
+            available
+            and self.route is Route.DISTRIBUTED_PHONO
+            and selected_source is Source.PHONO
+        ):
+            desired_route = Route.DISTRIBUTED_PHONO
         was_distributed = self.route in {
             Route.DISTRIBUTED_PHONO,
             Route.DISTRIBUTED_BLUETOOTH,
