@@ -63,8 +63,10 @@ class SendspinConfig:
     source_name: str
     source_enabled: bool = False
     state_dir: str = "/var/lib/phono-console/source"
-    phono_gain_db: float = 6.0
+    phono_gain_db: float = 12.0
     bluetooth_gain_db: float = 6.0
+    limiter_ceiling_dbfs: float = -1.0
+    limiter_release_ms: int = 200
 
 
 @dataclass(frozen=True)
@@ -170,8 +172,12 @@ def load_config(path: Path) -> Config:
             state_dir=str(
                 sendspin.get("state_dir", "/var/lib/phono-console/source")
             ),
-            phono_gain_db=float(sendspin.get("phono_gain_db", 6.0)),
+            phono_gain_db=float(sendspin.get("phono_gain_db", 12.0)),
             bluetooth_gain_db=float(sendspin.get("bluetooth_gain_db", 6.0)),
+            limiter_ceiling_dbfs=float(
+                sendspin.get("limiter_ceiling_dbfs", -1.0)
+            ),
+            limiter_release_ms=int(sendspin.get("limiter_release_ms", 200)),
         ),
         bluetooth=BluetoothConfig(
             enabled=bool(bluetooth.get("enabled", False)),
@@ -268,6 +274,10 @@ def _validate(config: Config) -> None:
         raise ValueError(
             "bluetooth volume range must satisfy 0 <= volume_min < volume_max <= 100"
         )
+    if not -12.0 <= config.sendspin.limiter_ceiling_dbfs <= 0.0:
+        raise ValueError("sendspin.limiter_ceiling_dbfs must be between -12 and 0")
+    if not 20 <= config.sendspin.limiter_release_ms <= 5000:
+        raise ValueError("sendspin.limiter_release_ms must be between 20 and 5000")
     if not config.routing.distribution_target:
         raise ValueError("routing.distribution_target must be non-empty")
     if config.routing.distribution_recovery_hold_ms < 0:
