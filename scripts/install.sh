@@ -345,8 +345,10 @@ player_name = "$(toml_escape "$ma_player")"
 source_name = "$(toml_escape "$vinyl_source")"
 source_enabled = true
 state_dir = "/var/lib/phono-console/source"
-phono_gain_db = 6.0
+phono_gain_db = 12.0
 bluetooth_gain_db = 6.0
+limiter_ceiling_dbfs = -1.0
+limiter_release_ms = 200
 
 [runtime]
 poll_interval_ms = 100
@@ -403,7 +405,8 @@ adapter = "hci0"
 alias = "PhonoConsole"
 pairing_window_seconds = 120
 volume_min = 20
-volume_max = 80
+volume_max = 60
+volume_curve = 0.65
 EOF
 fi
 if [[ -z "$(config_value bluetooth volume_min 2>/dev/null || true)" ]]; then
