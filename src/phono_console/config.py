@@ -35,7 +35,8 @@ class BluetoothConfig:
     alias: str = "PhonoConsole"
     pairing_window_seconds: int = 120
     volume_min: int = 20
-    volume_max: int = 80
+    volume_max: int = 60
+    volume_curve: float = 0.65
 
 
 @dataclass(frozen=True)
@@ -191,7 +192,8 @@ def load_config(path: Path) -> Config:
                 bluetooth.get("pairing_window_seconds", 120)
             ),
             volume_min=int(bluetooth.get("volume_min", 20)),
-            volume_max=int(bluetooth.get("volume_max", 80)),
+            volume_max=int(bluetooth.get("volume_max", 60)),
+            volume_curve=float(bluetooth.get("volume_curve", 0.65)),
         ),
         routing=RoutingConfig(
             distribution_target=str(
