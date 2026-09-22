@@ -576,6 +576,66 @@ def test_distributed_bluetooth_releases_after_detector_hold() -> None:
     asyncio.run(scenario())
 
 
+def test_distributed_bluetooth_survives_transient_ma_unavailability() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor()
+        bluetooth = SimulatedLevelMonitor()
+        bluetooth.level = -20.0
+        router = SimulatedAudioRouter()
+        ready = True
+        released = []
+
+        async def prepare(_source):
+            return True
+
+        async def release():
+            released.append(True)
+
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            router,
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            distribution_available=lambda: ready,
+            prepare_distribution=prepare,
+            release_distribution=release,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=1)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        assert router.routes[-1] is Route.DISTRIBUTED_BLUETOOTH
+        route_applications = len(router.routes)
+
+        # MA briefly clears the console player's active protocol during its
+        # source stop/start handshake.  The phone is still playing, so the
+        # console return path must remain open and keep its buffer position.
+        ready = False
+        await subject.tick(now=2)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        assert Route.IDLE not in router.routes[route_applications:]
+        assert released == []
+
+        ready = True
+        await subject.tick(now=3)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        assert Route.IDLE not in router.routes[route_applications:]
+        assert released == []
+
+        # This protection must not make the route permanent.  Once the phone
+        # actually stops producing audio and the detector's release interval
+        # expires, the distributed route closes normally.
+        ready = False
+        bluetooth.level = -120.0
+        await subject.tick(now=4)
+        await subject.tick(now=10)
+        assert subject.route is Route.IDLE
+        assert released == [True]
+
+    asyncio.run(scenario())
+
+
 def test_timestamped_distribution_waits_silently_then_switches_to_ma() -> None:
     async def scenario() -> None:
         phono = SimulatedLevelMonitor()
