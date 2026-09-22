@@ -45,21 +45,11 @@ else
     echo "Bluetooth ingest is waiting for an A2DP source."
 fi
 
-ENV_FILE="/etc/phono-console/environment"
-api_token="$(awk -F= '$1 == "PHONO_CONSOLE_API_TOKEN" {
-  print substr($0, index($0, "=") + 1)
-}' "$ENV_FILE" | tail -1)"
-if [[ -z "$api_token" ]]; then
-  echo "PHONO_CONSOLE_API_TOKEN is missing." >&2
-  exit 1
-fi
 curl --fail --silent --show-error \
-  -H "Authorization: Bearer $api_token" \
   http://127.0.0.1:8765/health/live
 echo
 
 if ! curl --fail --silent --show-error \
-  -H "Authorization: Bearer $api_token" \
   http://127.0.0.1:8765/health/ready; then
   echo >&2
   echo "Dashboard is live, but the audio path is not ready. Check it for details." >&2
