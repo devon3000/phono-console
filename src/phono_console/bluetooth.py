@@ -102,8 +102,10 @@ def parse_transport_volume(output: str) -> int | None:
     return max(0, min(127, int(match.group(0), 0)))
 
 
-def map_transport_volume(raw_volume: int, minimum: int, maximum: int) -> int:
-    """Compress AVRCP's 1..127 range while preserving zero as mute."""
+def map_transport_volume(
+    raw_volume: int, minimum: int, maximum: int, curve: float = 0.65
+) -> int:
+    """Compress AVRCP volume with extra resolution toward the loud end."""
     raw = max(0, min(127, int(raw_volume)))
     if raw == 0:
         return 0
