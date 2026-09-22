@@ -107,7 +107,8 @@ def map_transport_volume(raw_volume: int, minimum: int, maximum: int) -> int:
     raw = max(0, min(127, int(raw_volume)))
     if raw == 0:
         return 0
-    return round(minimum + (raw - 1) * (maximum - minimum) / 126)
+    normalized = (raw - 1) / 126
+    return round(minimum + normalized**curve * (maximum - minimum))
 
 
 class BluetoothManager:
@@ -206,7 +207,10 @@ class BluetoothManager:
             return
         self._last_transport_volume = raw_volume
         volume = map_transport_volume(
-            raw_volume, self.config.volume_min, self.config.volume_max
+            raw_volume,
+            self.config.volume_min,
+            self.config.volume_max,
+            self.config.volume_curve,
         )
         await self._publish(bluetooth_volume=volume, bluetooth_volume_raw=raw_volume)
         await self.events.emit(
