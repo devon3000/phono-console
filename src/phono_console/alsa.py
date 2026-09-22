@@ -35,6 +35,7 @@ class ArecordLevelMonitor:
         self._retry_seconds = 0.5
         self._last_error: str | None = None
         self._last_sample_at: float | None = None
+        self._discarded_windows = 0
         self.latest: StereoLevel | None = None
         self.session = LevelSession()
         frames = max(1, sample_rate * window_ms // 1000)
@@ -57,6 +58,12 @@ class ArecordLevelMonitor:
                 str(self.channels),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # Keep a minute of headroom so unrelated status work cannot
+                # back-pressure arecord or the shared dsnoop PCM.
+                limit=max(
+                    64 * 1024,
+                    self.sample_rate * self.channels * 2 * 60,
+                ),
             )
         except (FileNotFoundError, OSError) as exc:
             await self._record_failure("capture_start_failed", str(exc))
@@ -112,6 +119,24 @@ class ArecordLevelMonitor:
             pcm = await asyncio.wait_for(
                 self._process.stdout.readexactly(self._window_bytes), timeout=timeout
             )
+            # arecord runs continuously, whereas the controller can be delayed
+            # by unrelated status work. Never analyze queued historical PCM:
+            # discard complete old windows already waiting in the pipe and
+            # retain the newest one. readexactly cancellation leaves a partial
+            # next window buffered, preserving sample/frame alignment.
+            discarded = 0
+            max_buffered_windows = max(1, 60_000 // self.window_ms)
+            for _ in range(max_buffered_windows):
+                try:
+                    newer = await asyncio.wait_for(
+                        self._process.stdout.readexactly(self._window_bytes),
+                        timeout=0.001,
+                    )
+                except TimeoutError:
+                    break
+                pcm = newer
+                discarded += 1
+            self._discarded_windows += discarded
         except asyncio.IncompleteReadError as exc:
             process = self._process
             returncode = await process.wait()
@@ -166,6 +191,7 @@ class ArecordLevelMonitor:
                 else round(now - self._last_sample_at, 2)
             ),
             "retry_in_seconds": round(max(0.0, self._next_retry_at - now), 2),
+            "discarded_stale_windows": self._discarded_windows,
         }
 
     async def level_dbfs(self) -> float:
