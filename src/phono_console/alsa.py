@@ -125,7 +125,8 @@ class ArecordLevelMonitor:
             # retain the newest one. readexactly cancellation leaves a partial
             # next window buffered, preserving sample/frame alignment.
             discarded = 0
-            while True:
+            max_buffered_windows = max(1, 60_000 // self.window_ms)
+            for _ in range(max_buffered_windows):
                 try:
                     newer = await asyncio.wait_for(
                         self._process.stdout.readexactly(self._window_bytes),
