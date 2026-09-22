@@ -2,10 +2,8 @@
 set -euo pipefail
 
 volume="${!#}"
-source /etc/phono-console/environment
 curl --fail --silent --show-error \
   --request PUT \
-  --header "Authorization: Bearer $PHONO_CONSOLE_API_TOKEN" \
   --header "Content-Type: application/json" \
   --header "X-Phono-Volume-Source: music_assistant" \
   --data "{\"volume\":$volume}" \
