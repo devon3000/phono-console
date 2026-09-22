@@ -369,6 +369,12 @@ EOF
 
 fi
 
+if [[ "$(config_value sendspin phono_gain_db 2>/dev/null || true)" == "6.0" ]]; then
+  sed -i '0,/^phono_gain_db = 6.0$/s//phono_gain_db = 12.0/' "$CONFIG_FILE"
+fi
+if [[ -z "$(config_value sendspin limiter_ceiling_dbfs 2>/dev/null || true)" ]]; then
+  sed -i '0,/^bluetooth_gain_db = /s//&\nlimiter_ceiling_dbfs = -1.0\nlimiter_release_ms = 200/' "$CONFIG_FILE"
+fi
 if [[ -z "$(config_value sendspin phono_gain_db 2>/dev/null || true)" ]]; then
   sed -i '/^state_dir = "\/var\/lib\/phono-console\/source"/a phono_gain_db = 6.0\nbluetooth_gain_db = 6.0' \
     "$CONFIG_FILE"
@@ -408,6 +414,12 @@ volume_min = 20
 volume_max = 60
 volume_curve = 0.65
 EOF
+fi
+if [[ "$(config_value bluetooth volume_max 2>/dev/null || true)" == "80" ]]; then
+  sed -i '0,/^volume_max = 80$/s//volume_max = 60/' "$CONFIG_FILE"
+fi
+if [[ -z "$(config_value bluetooth volume_curve 2>/dev/null || true)" ]]; then
+  sed -i '0,/^volume_max = 60$/s//volume_max = 60\nvolume_curve = 0.65/' "$CONFIG_FILE"
 fi
 if [[ -z "$(config_value bluetooth volume_min 2>/dev/null || true)" ]]; then
   sed -i '/^pairing_window_seconds/a volume_min = 20\nvolume_max = 80' \
