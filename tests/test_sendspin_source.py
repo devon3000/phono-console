@@ -307,6 +307,41 @@ def test_bluetooth_source_commands_control_phone_and_latch_pause() -> None:
     asyncio.run(scenario())
 
 
+def test_signal_watcher_never_changes_controller_selected_source() -> None:
+    async def scenario() -> None:
+        state = StateStore()
+        events = SimulatedEventSink()
+        publisher = SendspinSourcePublisher(
+            SENDSPIN,
+            AUDIO,
+            events,
+            state,
+            signal_poll_seconds=0.01,
+            source_devices={
+                Source.PHONO: "phono_capture",
+                Source.BLUETOOTH: "bluealsa",
+            },
+        )
+        publisher._selected_source = Source.BLUETOOTH
+        # Simulate the stale status snapshot that previously raced a newer
+        # controller decision and silently switched capture back to phono.
+        await state.set_status(
+            Status(Route.DISTRIBUTED_PHONO, True, True, False, -40.0)
+        )
+        stop = asyncio.Event()
+        task = asyncio.create_task(publisher._watch_signal(stop))
+        await asyncio.sleep(0.03)
+        stop.set()
+        await task
+
+        assert publisher._selected_source is Source.BLUETOOTH
+        assert not any(
+            event == "sendspin_source_selected" for event, _ in events.events
+        )
+
+    asyncio.run(scenario())
+
+
 def test_phono_stop_reverts_output_after_grace_period() -> None:
     async def scenario() -> None:
         stopped: list[str] = []

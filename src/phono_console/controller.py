@@ -144,9 +144,19 @@ class Controller:
             if latest is not None
             else -120.0
         )
+        bluetooth_transport_playing = bool(
+            self.bluetooth_is_playing is not None and self.bluetooth_is_playing()
+        )
         needle_drop_detected = bool(
             capture_ok
             and not self.detector.active
+            # Treat the impact peak as a cheap wake/selection hint only while
+            # idle.  A single mechanical/electrical transient must never
+            # preempt Bluetooth, MA playback, or any other active route.  A
+            # real record still takes priority once sustained RMS passes the
+            # normal activity detector.
+            and self.route in {None, Route.IDLE}
+            and not bluetooth_transport_playing
             and peak_level >= self.config.detection.needle_drop_peak_dbfs
         )
         if needle_drop_detected:
@@ -239,9 +249,6 @@ class Controller:
             self._phono_mode_inactive_since = None
             self._phono_mode_last_refresh = None
         bluetooth_level = -120.0
-        bluetooth_transport_playing = bool(
-            self.bluetooth_is_playing is not None and self.bluetooth_is_playing()
-        )
         bluetooth_active = bluetooth_transport_playing
         bluetooth_capture_ok = self.bluetooth_monitor is not None
         if self.bluetooth_monitor is not None and not phono_signal_present:

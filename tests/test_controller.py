@@ -199,6 +199,51 @@ def test_needle_drop_peak_wakes_above_noise_without_rms_activity() -> None:
     asyncio.run(scenario())
 
 
+def test_phono_peak_transient_does_not_preempt_active_route() -> None:
+    class PeakMonitor(SimulatedLevelMonitor):
+        def __init__(self) -> None:
+            super().__init__(level=-70.0)
+            channel = ChannelLevel(
+                peak_dbfs=-43.0, rms_dbfs=-70.0, clipped=False
+            )
+            self.latest = StereoLevel(left=channel, right=channel)
+
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        subject = Controller(
+            config(),
+            PeakMonitor(),
+            SimulatedMusicAssistant(),
+            SimulatedAudioRouter(),
+            events,
+            bluetooth_monitor=SimulatedLevelMonitor(level=-30.0),
+            bluetooth_is_playing=lambda: True,
+        )
+
+        status = await subject.tick(now=1)
+        assert status.route is Route.LOCAL_BLUETOOTH
+        assert not status.phono_active
+        assert not any(
+            event == "phono_needle_drop_detected" for event, _ in events.events
+        )
+
+        # The same shortcut is disabled for non-Bluetooth playback too.
+        ma = SimulatedMusicAssistant(playing=True)
+        ma_subject = Controller(
+            config(),
+            PeakMonitor(),
+            ma,
+            SimulatedAudioRouter(),
+            SimulatedEventSink(),
+        )
+        ma_subject.route = Route.MA_PLAYBACK
+        ma_status = await ma_subject.tick(now=2)
+        assert ma_status.route is Route.MA_PLAYBACK
+        assert not ma_status.phono_active
+
+    asyncio.run(scenario())
+
+
 def test_controller_activates_local_phono_profile_on_route_entry() -> None:
     async def scenario() -> None:
         level = SimulatedLevelMonitor()

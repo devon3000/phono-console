@@ -598,15 +598,19 @@ class SendspinSourcePublisher:
                     selected = Source.PHONO
                 elif status.bluetooth_active:
                     selected = Source.BLUETOOTH
-            if selected in self._source_devices:
-                await self.select_source(selected)
+            # Source selection belongs exclusively to Controller via
+            # prepare_distribution().  Selecting here from the previous
+            # published status races the current controller tick: one task can
+            # choose Bluetooth after the controller chose phono (or vice
+            # versa), leaving the declared route and actual Sendspin capture
+            # source inconsistent.  This watcher reports line sense only.
             detected = (
                 bool(status.phono_active or status.bluetooth_active)
                 if status is not None
                 else False
             )
             source_enabled = self._source_distribution_enabled.get(
-                selected or self._selected_source, True
+                self._selected_source, True
             )
             if self._bluetooth_pause_latched and selected is Source.BLUETOOTH:
                 media_status = (
