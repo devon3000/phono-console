@@ -70,10 +70,10 @@ provider; it does not depend on an undocumented arbitrary server-log endpoint.
 ## Local control and status
 
 The daemon maintains a bounded event history and current status snapshot. A
-small authenticated HTTP API exposes health, status, and time-limited Bluetooth
-pairing to Home Assistant. The installer binds it to the LAN,
-generates a bearer token, verifies the authenticated health endpoint, and the
-daemon refuses network exposure if that token is absent.
+small HTTP API exposes health, status, and time-limited Bluetooth pairing to
+Home Assistant. The installer binds it to the trusted home LAN without
+application-level authentication and verifies the health endpoint. Port 8765
+must not be exposed to the internet.
 
 ## Feedback prevention
 

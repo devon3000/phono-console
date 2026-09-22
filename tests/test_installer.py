@@ -13,12 +13,12 @@ def test_install_scripts_are_executable_and_valid_shell() -> None:
         subprocess.run(["bash", "-n", str(script)], check=True)
 
 
-def test_installer_secures_and_checks_the_network_api() -> None:
+def test_installer_exposes_and_checks_the_network_api() -> None:
     installer = (ROOT / "scripts" / "install.sh").read_text()
     assert "sys.version_info < (3, 12)" in installer
     assert 'api_host = "0.0.0.0"' in installer
-    assert "secrets.token_urlsafe(32)" in installer
-    assert 'Authorization: Bearer $api_token' in installer
+    assert "secrets.token_urlsafe(32)" not in installer
+    assert 'Authorization: Bearer $api_token' not in installer
     assert "/health/live" in installer
     assert "healthy_count >= 3" in installer
 

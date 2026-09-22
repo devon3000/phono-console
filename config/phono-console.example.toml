@@ -80,7 +80,6 @@ bluetooth_gain_db = 6.0
 
 [runtime]
 poll_interval_ms = 100
-# Listen on the LAN so Home Assistant can reach the authenticated API.
+# The dashboard and control API are intended for a trusted local network.
 api_host = "0.0.0.0"
 api_port = 8765
-api_token_env = "PHONO_CONSOLE_API_TOKEN"

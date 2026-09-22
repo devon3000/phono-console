@@ -31,14 +31,6 @@ from .state import StateStore
 LOGGER = logging.getLogger(__name__)
 
 
-def validate_api_security(host: str, token: str | None) -> None:
-    """Refuse an unauthenticated API exposed beyond the local machine."""
-    if host not in {"127.0.0.1", "::1", "localhost"} and token is None:
-        raise RuntimeError(
-            "PHONO_CONSOLE_API_TOKEN must be set when the API listens on the network"
-        )
-
-
 def system_info() -> dict[str, object]:
     hostname = socket.gethostname()
     addresses: set[str] = set()
@@ -424,8 +416,6 @@ async def run_daemon(config: Config) -> None:
         activate_route=activate_route,
     )
 
-    api_token = os.getenv(config.runtime.api_token_env) or None
-    validate_api_security(config.runtime.api_host, api_token)
     info = system_info()
     info.update(
         {
@@ -548,7 +538,7 @@ async def run_daemon(config: Config) -> None:
 
     api = ControlApi(
         state,
-        api_token,
+        None,
         whole_house_available=config.sendspin.source_enabled,
         whole_house_action=whole_house_action,
         level_reset_action=reset_level_history,

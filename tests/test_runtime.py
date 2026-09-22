@@ -1,13 +1,11 @@
 from pathlib import Path
 
-import pytest
 
 from phono_console.config import load_config
 
 from phono_console.runtime import (
     local_loopback_command,
     system_info,
-    validate_api_security,
 )
 
 
@@ -21,13 +19,6 @@ def test_local_loopback_command_uses_configured_audio_path() -> None:
     assert command[command.index("-P") + 1] == "hw:CARD=vc4hdmi0,DEV=0"
     assert command[command.index("-r") + 1] == "48000"
     assert command[command.index("-t") + 1] == "40000"
-
-
-def test_network_api_requires_token() -> None:
-    with pytest.raises(RuntimeError, match="API_TOKEN"):
-        validate_api_security("0.0.0.0", None)
-    validate_api_security("0.0.0.0", "secret")
-    validate_api_security("127.0.0.1", None)
 
 
 def test_system_info_has_dashboard_network_shape() -> None:

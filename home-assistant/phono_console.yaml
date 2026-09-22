@@ -1,10 +1,8 @@
-# Replace PHONO_CONSOLE_IP and configure phono_console_authorization in secrets.yaml.
+# Replace PHONO_CONSOLE_IP with the Raspberry Pi's reserved LAN address.
 rest:
   - resource: "http://PHONO_CONSOLE_IP:8765/v1/status"
     scan_interval: 2
     timeout: 2
-    headers:
-      Authorization: !secret phono_console_authorization
     sensor:
       - name: "Phono Console Route"
         unique_id: phono_console_route

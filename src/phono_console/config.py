@@ -72,7 +72,6 @@ class RuntimeConfig:
     poll_interval_ms: int = 100
     api_host: str = "0.0.0.0"
     api_port: int = 8765
-    api_token_env: str = "PHONO_CONSOLE_API_TOKEN"
 
 
 @dataclass(frozen=True)
@@ -212,9 +211,6 @@ def load_config(path: Path) -> Config:
             poll_interval_ms=int(runtime.get("poll_interval_ms", 100)),
             api_host=str(runtime.get("api_host", "0.0.0.0")),
             api_port=int(runtime.get("api_port", 8765)),
-            api_token_env=str(
-                runtime.get("api_token_env", "PHONO_CONSOLE_API_TOKEN")
-            ),
         ),
         audio_engine=AudioEngineConfig(
             backend=str(audio_engine.get("backend", "legacy")),
