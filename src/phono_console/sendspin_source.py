@@ -55,6 +55,68 @@ def apply_gain_s16le(pcm: bytes, gain_db: float) -> bytes:
     return samples.tobytes()
 
 
+class PeakLimiterS16LE:
+    """Linked-stereo block peak limiter with lookahead across each PCM chunk."""
+
+    def __init__(
+        self,
+        gain_db: float,
+        *,
+        ceiling_dbfs: float = -1.0,
+        release_ms: int = 200,
+        sample_rate: int = 48_000,
+        channels: int = 2,
+    ) -> None:
+        self.makeup_gain = math.pow(10.0, gain_db / 20.0)
+        self.ceiling = 32767.0 * math.pow(10.0, ceiling_dbfs / 20.0)
+        self.release_seconds = release_ms / 1000.0
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.limiter_gain = 1.0
+        self.max_gain_reduction_db = 0.0
+        self.limited_chunks = 0
+
+    @property
+    def gain_reduction_db(self) -> float:
+        if self.limiter_gain >= 1.0:
+            return 0.0
+        return -20.0 * math.log10(max(self.limiter_gain, 1e-9))
+
+    def process(self, pcm: bytes) -> bytes:
+        if not pcm:
+            return pcm
+        samples = array("h")
+        samples.frombytes(pcm)
+        if sys.byteorder != "little":
+            samples.byteswap()
+        peak = max((abs(int(sample)) for sample in samples), default=0)
+        boosted_peak = peak * self.makeup_gain
+        target = (
+            min(1.0, self.ceiling / boosted_peak)
+            if boosted_peak > 0
+            else 1.0
+        )
+        if target < self.limiter_gain:
+            self.limiter_gain = target
+        elif self.limiter_gain < target:
+            frames = len(samples) / max(1, self.channels)
+            coefficient = math.exp(
+                -(frames / self.sample_rate) / self.release_seconds
+            )
+            released = 1.0 - (1.0 - self.limiter_gain) * coefficient
+            self.limiter_gain = min(target, released)
+        if self.limiter_gain < 0.999999:
+            self.limited_chunks += 1
+        reduction = self.gain_reduction_db
+        self.max_gain_reduction_db = max(self.max_gain_reduction_db, reduction)
+        factor = self.makeup_gain * self.limiter_gain
+        for index, sample in enumerate(samples):
+            samples[index] = max(-32768, min(32767, round(sample * factor)))
+        if sys.byteorder != "little":
+            samples.byteswap()
+        return samples.tobytes()
+
+
 class BluetoothMedia(Protocol):
     @property
     def playback_status(self) -> str | None: ...
@@ -185,6 +247,9 @@ class SendspinSourcePublisher:
         self._phono_stop_task: asyncio.Task[None] | None = None
         self._bluetooth_pause_latched = False
         self._bluetooth_pause_observed = False
+        self._limiter_gain_reduction_db = 0.0
+        self._limiter_max_gain_reduction_db = 0.0
+        self._limiter_limited_chunks = 0
 
     @property
     def phono_stop_pending(self) -> bool:
@@ -316,6 +381,13 @@ class SendspinSourcePublisher:
                 "phono_stop_pending": self.phono_stop_pending,
                 "error": self._stream_error,
                 "selected_source": self._selected_source.value,
+                "limiter_gain_reduction_db": round(
+                    self._limiter_gain_reduction_db, 2
+                ),
+                "limiter_max_gain_reduction_db": round(
+                    self._limiter_max_gain_reduction_db, 2
+                ),
+                "limiter_limited_chunks": self._limiter_limited_chunks,
             }
         )
         await self.state.set_component(
@@ -324,6 +396,10 @@ class SendspinSourcePublisher:
             self._stream_error
             or ("connected" if self._connected else "disconnected"),
             streaming=self._streaming,
+            limiter_gain_reduction_db=round(self._limiter_gain_reduction_db, 2),
+            limiter_max_gain_reduction_db=round(
+                self._limiter_max_gain_reduction_db, 2
+            ),
         )
 
     def _on_server_command(self, payload: object) -> None:
@@ -445,6 +521,30 @@ class SendspinSourcePublisher:
             if self._selected_source is Source.BLUETOOTH
             else self.config.phono_gain_db
         )
+        limiter = PeakLimiterS16LE(
+            gain_db,
+            ceiling_dbfs=self.config.limiter_ceiling_dbfs,
+            release_ms=self.config.limiter_release_ms,
+            sample_rate=self.audio.sample_rate,
+            channels=self.audio.channels,
+        )
+        self._limiter_gain_reduction_db = 0.0
+        self._limiter_max_gain_reduction_db = 0.0
+        self._limiter_limited_chunks = 0
+        next_limiter_publish = asyncio.get_running_loop().time() + 1.0
+
+        async def limit(pcm: bytes) -> bytes:
+            nonlocal next_limiter_publish
+            processed = limiter.process(pcm)
+            self._limiter_gain_reduction_db = limiter.gain_reduction_db
+            self._limiter_max_gain_reduction_db = limiter.max_gain_reduction_db
+            self._limiter_limited_chunks = limiter.limited_chunks
+            now = asyncio.get_running_loop().time()
+            if now >= next_limiter_publish:
+                next_limiter_publish = now + 1.0
+                await self._publish_state()
+            return processed
+
         try:
             async for chunk in stream:
                 if isinstance(chunk, TimestampedPcm):
@@ -452,13 +552,13 @@ class SendspinSourcePublisher:
                         raise CaptureUnavailable(
                             "timestamped source capture crossed a discontinuity"
                         )
-                    pcm = apply_gain_s16le(chunk.pcm, gain_db)
+                    pcm = await limit(chunk.pcm)
                     timestamp_us = chunk.first_sample_time_us
                     frames = chunk.frames
                     await capture.feed(pcm, capture_timestamp_us=timestamp_us)
                     captured_frames += frames
                     continue
-                pcm = apply_gain_s16le(chunk, gain_db)
+                pcm = await limit(chunk)
                 frames = len(pcm) // frame_stride
                 if capture_anchor_us is None:
                     client = self._client
