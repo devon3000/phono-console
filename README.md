@@ -177,9 +177,9 @@ When invoked as a standalone command, `levels` owns the ALSA capture device and
 should be run while the service is stopped unless the ALSA device supports
 sharing.
 
-The embedded control API is designed for Home Assistant. The installer exposes
-it to the LAN, generates a bearer token in `/etc/phono-console/environment`,
-and verifies the authenticated health endpoint before reporting success. Its
+The embedded control API is designed for Home Assistant and the trusted home
+LAN. The installer exposes it without authentication and verifies the health
+endpoint before reporting success. Do not expose port 8765 to the internet. Its
 initial endpoints are:
 
 - `GET /` — responsive status and metering dashboard
@@ -210,7 +210,7 @@ troubleshooting switch that forces both phono and Bluetooth to the console.
 During a live handoff, the dashboard reports **Connecting Downstairs** until the
 actual synchronized route is active; the selected preference is not presented
 as successful playback.
-Enter the generated API token once per browser tab to see the active route,
+Open the dashboard to see the active route,
 stereo input peak/RMS/max/clip meters, local-output state, Music Assistant and
 Sendspin connectivity, component health/errors, configured devices, version,
 uptime, network identity, recent events, pairing, and distribution status. The
@@ -229,7 +229,7 @@ In Music Assistant, open the connected Sendspin source's settings and set
 **Automatically play line-in on player** to **Downstairs**. The console reports
 signal presence and waits for Music Assistant's source start command; Live
 Inputs cannot be started through the ordinary queue `play_media` API.
-The authenticated dashboard displays the source's persistent `SP:0...` pairing
+The dashboard displays the source's persistent `SP:0...` pairing
 token; paste it into Music Assistant when prompted, then restart the console
 service if Music Assistant does not immediately re-handshake.
 
