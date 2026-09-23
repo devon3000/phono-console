@@ -2,15 +2,18 @@
 
 ## Implementation status
 
-Work is isolated on `feature/timestamped-audio-engine`.
-
 - Phase 0: legacy default and rollback path preserved.
-- Phase 1: native ALSA timestamp probe implemented and installed with releases;
-  awaiting execution against the UFO202 and BlueALSA PCMs on the target Pi.
+- Phase 1: native ALSA timestamp probe implemented and exercised on the target
+  Raspberry Pi.
 - Phase 2: versioned C/Python frame protocol, bounded Python fan-out, and exact
   timestamp forwarding into Sendspin implemented with automated tests.
-- Timestamped backend activation remains intentionally blocked until the Phase
-  1 device gate passes. Selecting it cannot silently run the legacy graph.
+- Phases 3 and 4: timestamped Bluetooth capture, fan-out, local adaptive
+  playback, Sendspin forwarding, activity detection, and telemetry implemented
+  behind `audio_engine.backend = "timestamped"` and tested on the target Pi.
+- Phase 5 remains: unify MA-return output ownership in the engine and remove
+  runtime-managed output loopbacks.
+- Phase 6 remains: complete the sustained device soak before changing the
+  installer default from the reversible legacy backend.
 
 ## Purpose
 

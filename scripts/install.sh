@@ -347,6 +347,8 @@ source_enabled = true
 state_dir = "/var/lib/phono-console/source"
 phono_gain_db = 6.0
 bluetooth_gain_db = 6.0
+limiter_ceiling_dbfs = -1.0
+limiter_release_ms = 250
 
 [runtime]
 poll_interval_ms = 100
@@ -369,6 +371,10 @@ fi
 
 if [[ -z "$(config_value sendspin phono_gain_db 2>/dev/null || true)" ]]; then
   sed -i '/^state_dir = "\/var\/lib\/phono-console\/source"/a phono_gain_db = 6.0\nbluetooth_gain_db = 6.0' \
+    "$CONFIG_FILE"
+fi
+if [[ -z "$(config_value sendspin limiter_ceiling_dbfs 2>/dev/null || true)" ]]; then
+  sed -i '/^bluetooth_gain_db = /a limiter_ceiling_dbfs = -1.0\nlimiter_release_ms = 250' \
     "$CONFIG_FILE"
 fi
 
