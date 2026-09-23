@@ -65,6 +65,8 @@ class SendspinConfig:
     state_dir: str = "/var/lib/phono-console/source"
     phono_gain_db: float = 6.0
     bluetooth_gain_db: float = 6.0
+    limiter_ceiling_dbfs: float = -1.0
+    limiter_release_ms: int = 250
 
 
 @dataclass(frozen=True)
@@ -172,6 +174,10 @@ def load_config(path: Path) -> Config:
             ),
             phono_gain_db=float(sendspin.get("phono_gain_db", 6.0)),
             bluetooth_gain_db=float(sendspin.get("bluetooth_gain_db", 6.0)),
+            limiter_ceiling_dbfs=float(
+                sendspin.get("limiter_ceiling_dbfs", -1.0)
+            ),
+            limiter_release_ms=int(sendspin.get("limiter_release_ms", 250)),
         ),
         bluetooth=BluetoothConfig(
             enabled=bool(bluetooth.get("enabled", False)),
@@ -288,6 +294,12 @@ def _validate(config: Config) -> None:
         raise ValueError("sendspin.phono_gain_db must be between -24 and 24")
     if not -24.0 <= config.sendspin.bluetooth_gain_db <= 24.0:
         raise ValueError("sendspin.bluetooth_gain_db must be between -24 and 24")
+    if not -12.0 <= config.sendspin.limiter_ceiling_dbfs <= 0.0:
+        raise ValueError(
+            "sendspin.limiter_ceiling_dbfs must be between -12 and 0"
+        )
+    if not 10 <= config.sendspin.limiter_release_ms <= 5000:
+        raise ValueError("sendspin.limiter_release_ms must be between 10 and 5000")
     if config.audio_engine.backend not in {"legacy", "timestamped"}:
         raise ValueError("audio_engine.backend must be legacy or timestamped")
     if not config.audio_engine.socket_path.startswith("/"):

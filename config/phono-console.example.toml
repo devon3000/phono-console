@@ -77,6 +77,10 @@ source_enabled = true
 state_dir = "/var/lib/phono-console/source"
 phono_gain_db = 6.0
 bluetooth_gain_db = 6.0
+# Linked stereo peak limiter applied after source gain. It adds no samples of
+# delay and prevents boosted live inputs from clipping before Music Assistant.
+limiter_ceiling_dbfs = -1.0
+limiter_release_ms = 250
 
 [runtime]
 poll_interval_ms = 100

@@ -145,6 +145,12 @@ once in its UI and remembered. The controller then starts Console Input on the
 fixed `Downstairs` target automatically for Bluetooth. Phono is published only
 when its persistent output mode is **Synchronized Downstairs**.
 
+The configurable phono and Bluetooth gains are followed by a linked stereo
+peak limiter before Sendspin. Its immediate attack prevents boosted live input
+from clipping, its release is smoothed across source blocks, and it adds no
+samples of delay or timestamp shift. The default ceiling is -1 dBFS with a
+250 ms release.
+
 Run the target probe on the Raspberry Pi with:
 
 ```bash
@@ -234,3 +240,5 @@ token; paste it into Music Assistant when prompted, then restart the console
 service if Music Assistant does not immediately re-handshake.
 
 See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
+The planned encoder, switch, LED meanings, and cabinet mounting constraints are
+documented in [docs/hardware-controls.md](docs/hardware-controls.md).

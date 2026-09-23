@@ -6,7 +6,11 @@ from phono_console.config import AudioConfig, SendspinConfig
 from phono_console.controller import Status
 from phono_console.audio_engine_protocol import AudioSource, FrameFlags, TimestampedPcm
 from phono_console.policy import Route, Source
-from phono_console.sendspin_source import SendspinSourcePublisher, apply_gain_s16le
+from phono_console.sendspin_source import (
+    PeakLimiterS16le,
+    SendspinSourcePublisher,
+    apply_gain_s16le,
+)
 from phono_console.simulation import SimulatedEventSink
 from phono_console.state import StateStore
 
@@ -122,14 +126,39 @@ async def three_pcm_chunks():
         yield b"\x00\x00" * 2 * 960
 
 
-def test_pcm_gain_amplifies_and_saturates_without_wrapping() -> None:
-    samples = array("h", [1000, -1000, 20000, -20000])
+def test_pcm_gain_amplifies_without_clipping() -> None:
+    samples = array("h", [1000, -1000])
     boosted = array("h")
     boosted.frombytes(apply_gain_s16le(samples.tobytes(), 6.0))
-    assert boosted[0] == 1995
-    assert boosted[1] == -1995
-    assert boosted[2] == 32767
-    assert boosted[3] == -32768
+    assert list(boosted) == [1995, -1995]
+
+
+def test_peak_limiter_is_stereo_linked_and_respects_ceiling() -> None:
+    limiter = PeakLimiterS16le(6.0, ceiling_dbfs=-1.0)
+    samples = array("h", [20_000, 1_000, -20_000, -1_000])
+    limited = array("h")
+    limited.frombytes(limiter.process(samples.tobytes()))
+
+    assert max(abs(sample) for sample in limited) <= 29_203
+    assert limited[0] == -limited[2]
+    assert limited[1] == -limited[3]
+    # Both channels receive exactly the same reduction rather than the loud
+    # channel being clipped independently.
+    assert abs(limited[0] / limited[1] - 20.0) < 0.02
+    assert limiter.gain_reduction_db > 0
+
+
+def test_peak_limiter_releases_smoothly() -> None:
+    limiter = PeakLimiterS16le(
+        6.0, ceiling_dbfs=-1.0, release_ms=250, sample_rate=48_000
+    )
+    limiter.process(array("h", [20_000, -20_000] * 480).tobytes())
+    reduction_after_peak = limiter.gain_reduction_db
+    quiet = array("h")
+    quiet.frombytes(limiter.process(array("h", [1000, -1000] * 480).tobytes()))
+
+    assert 0 < limiter.gain_reduction_db < reduction_after_peak
+    assert abs(quiet[0]) < 1995
 
 
 def test_publisher_applies_source_specific_gain() -> None:

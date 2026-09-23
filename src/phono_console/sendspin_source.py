@@ -39,20 +39,80 @@ ClientFactory = Callable[[], Awaitable[object]]
 SourceStopAction = Callable[[Source], Awaitable[None]]
 
 
+class PeakLimiterS16le:
+    """Apply linked gain and peak limiting to interleaved signed 16-bit PCM.
+
+    A complete source block is available before it is sent to Sendspin, so its
+    peak provides zero-added-latency lookahead. Reduction attacks immediately
+    and releases smoothly across later blocks. One envelope is shared by all
+    channels, preserving the stereo image.
+    """
+
+    def __init__(
+        self,
+        gain_db: float,
+        *,
+        ceiling_dbfs: float = -1.0,
+        release_ms: int = 250,
+        sample_rate: int = 48_000,
+        channels: int = 2,
+    ) -> None:
+        self._base_gain = math.pow(10.0, gain_db / 20.0)
+        self._ceiling = math.floor(
+            32767 * math.pow(10.0, ceiling_dbfs / 20.0)
+        )
+        self._release_seconds = release_ms / 1000.0
+        self._sample_rate = sample_rate
+        self._channels = channels
+        self._limiter_gain = 1.0
+
+    @property
+    def gain_reduction_db(self) -> float:
+        if self._limiter_gain >= 1.0:
+            return 0.0
+        return -20.0 * math.log10(self._limiter_gain)
+
+    def process(self, pcm: bytes) -> bytes:
+        if not pcm:
+            return pcm
+        samples = array("h")
+        samples.frombytes(pcm)
+        if sys.byteorder != "little":
+            samples.byteswap()
+
+        peak = max((abs(sample) for sample in samples), default=0)
+        requested_peak = peak * self._base_gain
+        required_gain = (
+            min(1.0, self._ceiling / requested_peak)
+            if requested_peak > 0
+            else 1.0
+        )
+        if required_gain < self._limiter_gain:
+            self._limiter_gain = required_gain
+        elif self._limiter_gain < required_gain:
+            frames = len(samples) / self._channels
+            duration = frames / self._sample_rate
+            release_fraction = 1.0 - math.exp(
+                -duration / self._release_seconds
+            )
+            self._limiter_gain += (
+                required_gain - self._limiter_gain
+            ) * release_fraction
+
+        factor = self._base_gain * self._limiter_gain
+        if factor == 1.0:
+            return pcm
+        for index, sample in enumerate(samples):
+            value = round(sample * factor)
+            samples[index] = max(-self._ceiling, min(self._ceiling, value))
+        if sys.byteorder != "little":
+            samples.byteswap()
+        return samples.tobytes()
+
+
 def apply_gain_s16le(pcm: bytes, gain_db: float) -> bytes:
-    """Apply gain to signed 16-bit PCM with saturation instead of wraparound."""
-    if not pcm or gain_db == 0:
-        return pcm
-    samples = array("h")
-    samples.frombytes(pcm)
-    if sys.byteorder != "little":
-        samples.byteswap()
-    factor = math.pow(10.0, gain_db / 20.0)
-    for index, sample in enumerate(samples):
-        samples[index] = max(-32768, min(32767, round(sample * factor)))
-    if sys.byteorder != "little":
-        samples.byteswap()
-    return samples.tobytes()
+    """Compatibility helper for one-block gain with safe peak limiting."""
+    return PeakLimiterS16le(gain_db).process(pcm)
 
 
 class BluetoothMedia(Protocol):
@@ -445,6 +505,13 @@ class SendspinSourcePublisher:
             if self._selected_source is Source.BLUETOOTH
             else self.config.phono_gain_db
         )
+        limiter = PeakLimiterS16le(
+            gain_db,
+            ceiling_dbfs=self.config.limiter_ceiling_dbfs,
+            release_ms=self.config.limiter_release_ms,
+            sample_rate=self.audio.sample_rate,
+            channels=self.audio.channels,
+        )
         try:
             async for chunk in stream:
                 if isinstance(chunk, TimestampedPcm):
@@ -452,13 +519,13 @@ class SendspinSourcePublisher:
                         raise CaptureUnavailable(
                             "timestamped source capture crossed a discontinuity"
                         )
-                    pcm = apply_gain_s16le(chunk.pcm, gain_db)
+                    pcm = limiter.process(chunk.pcm)
                     timestamp_us = chunk.first_sample_time_us
                     frames = chunk.frames
                     await capture.feed(pcm, capture_timestamp_us=timestamp_us)
                     captured_frames += frames
                     continue
-                pcm = apply_gain_s16le(chunk, gain_db)
+                pcm = limiter.process(chunk)
                 frames = len(pcm) // frame_stride
                 if capture_anchor_us is None:
                     client = self._client

@@ -55,22 +55,19 @@ stalled reads, and reopens the capture path with bounded exponential backoff.
 Detailed design, staging, test criteria, and rollback are maintained in
 [Timestamped audio engine implementation plan](timestamped-audio-engine-plan.md).
 
-- Replace the Bluetooth `BlueALSA -> FFmpeg -> ALSA loopback -> arecord` path
-  with one timestamp-aware capture/fan-out process.
-- Acquire ALSA hardware timestamps and carry first-sample capture time with
-  every PCM block supplied to Sendspin.
-- Use one adaptive resampler and one authoritative sample timeline for local
-  playback, activity detection, metering, and distribution.
-- Account for measured capture/resampler latency and explicitly handle clock
-  drift, gaps, underruns, overruns, and transport restarts.
-- Remove `dsnoop` multi-reader fan-out from Bluetooth once the new component is
-  verified on the Raspberry Pi.
+- Implemented as an opt-in timestamp-aware native capture/fan-out process.
+- ALSA timestamps and first-sample capture time are carried with PCM supplied
+  to Sendspin.
+- Local adaptive playback, activity detection, metering, and distribution use
+  one authoritative capture timeline.
+- Discontinuities and bounded queue loss are explicit in engine telemetry.
+- The legacy graph remains available for rollback during the device soak.
+- Remaining: move MA-return rendering into the engine so one component owns
+  every physical-output route.
 - Bench-test uninterrupted Bluetooth distribution and cross-room sync for at
   least one hour, including pause/resume, phone reconnect, MA reconnect, and
   network interruption.
 
-Until this work is complete, frame-count-derived Sendspin timestamps are a
-mitigation, not proof that original Bluetooth timing is preserved.
 
 ## 4. Home Assistant and installation
 
@@ -84,3 +81,14 @@ mitigation, not proof that original Bluetooth timing is preserved.
 - Bench-test service startup, recovery, and USB reconnect behavior on the Pi.
 - Install the Pi, UFO202, and amplifier with adequate ventilation and properly
   enclosed mains wiring.
+
+## 5. Cabinet controls
+
+- The volume API and route-dependent volume ownership are implemented.
+- Mechanical layout and control semantics are documented in
+  [Cabinet hardware controls](hardware-controls.md).
+- Select the encoder GPIO pins and detachable connector pinout on the bench.
+- Add a disabled-by-default GPIO worker with quadrature, debounce, acceleration,
+  and push-switch tests.
+- Finalize the straight-line three-LED PCB only after checking a full-size
+  drilling template against the false drawer.

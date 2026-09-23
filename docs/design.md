@@ -2,7 +2,8 @@
 
 ## Invariants
 
-1. The amplifier is permanently connected to the UFO202 RCA output.
+1. The amplifier is permanently connected to Raspberry Pi HDMI output; the
+   UFO202 is capture-only.
 2. The turntable is permanently connected to the UFO202 phono input.
 3. The Pi is the only router; source changes are signal-driven and require no
    physical or dashboard source switch.
@@ -90,34 +91,22 @@ while the Music Assistant provider commands it, and Music Assistant playback
 is produced by the separate Sendspin player service, so the returned stream
 never re-enters the capture path.
 
-## Known Bluetooth timestamp limitation
+## Bluetooth timestamp architecture
 
 The implementation sequence and acceptance gates are defined in
 [Timestamped audio engine implementation plan](timestamped-audio-engine-plan.md).
 
-The current Bluetooth path is:
+The legacy Bluetooth path, retained as a rollback option, is:
 
 ```text
 A2DP/RTP -> BlueALSA -> FFmpeg resampler -> ALSA loopback
          -> arecord raw PCM -> Sendspin source
 ```
 
-Bluetooth packets arrive with transport timestamps, but those timestamps do
-not survive the decoded ALSA PCM interface or `arecord`'s raw stdout format.
-The Sendspin publisher therefore cannot pass the original timestamps through.
-It currently anchors the first PCM sample to the Sendspin client's monotonic
-clock and advances subsequent timestamps from captured frame count. This is a
-stabilization measure: it prevents buffered blocks sent in a burst from being
-assigned overlapping send-time timestamps, but it assumes a continuous sample
-clock and cannot faithfully represent a real capture gap, clock correction,
-underrun, overrun, or transport restart.
-
-This is an architectural limitation for synchronized distribution even when
-the same path sounds acceptable through direct local playback. The durable
-design is a single timestamp-aware Bluetooth capture/fan-out component that:
+The opt-in timestamped backend replaces that graph with a native engine. It:
 
 - exclusively owns the BlueALSA PCM capture;
-- reads ALSA hardware timestamps instead of piping unannotated raw PCM through
+- reads ALSA timestamps instead of piping unannotated raw PCM through
   `arecord`;
 - performs adaptive resampling while maintaining one authoritative sample
   timeline and measured pipeline latency;
@@ -126,9 +115,8 @@ design is a single timestamp-aware Bluetooth capture/fan-out component that:
   timestamped frame stream; and
 - removes the Bluetooth ALSA-loopback/`dsnoop` multi-reader fan-out.
 
-Passing the original A2DP/RTP timestamps end to end would require a BlueALSA
-integration that exposes them before or alongside PCM decode. If that is not
-practical, ALSA hardware timestamps are the required source of truth at the
-capture boundary. The generalized source pipeline should offer the same
-timestamp contract to phono capture, even though phono has no upstream RTP
-clock.
+It remains opt-in until the Raspberry Pi soak covers sustained playback,
+pause/resume, track changes, range degradation, phone reconnect, MA reconnect,
+and network interruption. The remaining output-unification phase will move MA
+return rendering into the same engine and eliminate runtime-managed
+`alsaloop` output ownership.
