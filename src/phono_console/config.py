@@ -101,6 +101,18 @@ class AmplifierConfig:
 
 
 @dataclass(frozen=True)
+class ControlsConfig:
+    enabled: bool = False
+    encoder_a_gpio: int = 17
+    encoder_b_gpio: int = 27
+    encoder_button_gpio: int = 22
+    volume_step: int = 2
+    reverse: bool = False
+    encoder_bounce_ms: int = 2
+    button_bounce_ms: int = 40
+
+
+@dataclass(frozen=True)
 class Config:
     audio: AudioConfig
     detection: DetectionConfig
@@ -111,6 +123,7 @@ class Config:
     runtime: RuntimeConfig = RuntimeConfig()
     audio_engine: AudioEngineConfig = AudioEngineConfig()
     amplifier: AmplifierConfig = AmplifierConfig()
+    controls: ControlsConfig = ControlsConfig()
 
 
 def _required(table: dict, key: str, section: str):
@@ -133,6 +146,7 @@ def load_config(path: Path) -> Config:
     routing = raw.get("routing", {})
     audio_engine = raw.get("audio_engine", {})
     amplifier = raw.get("amplifier", {})
+    controls = raw.get("controls", {})
 
     config = Config(
         audio=AudioConfig(
@@ -246,6 +260,16 @@ def load_config(path: Path) -> Config:
             volume_max=int(amplifier.get("volume_max", 45)),
             local_phono_volume=int(amplifier.get("local_phono_volume", 50)),
         ),
+        controls=ControlsConfig(
+            enabled=bool(controls.get("enabled", False)),
+            encoder_a_gpio=int(controls.get("encoder_a_gpio", 17)),
+            encoder_b_gpio=int(controls.get("encoder_b_gpio", 27)),
+            encoder_button_gpio=int(controls.get("encoder_button_gpio", 22)),
+            volume_step=int(controls.get("volume_step", 2)),
+            reverse=bool(controls.get("reverse", False)),
+            encoder_bounce_ms=int(controls.get("encoder_bounce_ms", 2)),
+            button_bounce_ms=int(controls.get("button_bounce_ms", 40)),
+        ),
     )
     _validate(config)
     return config
@@ -334,3 +358,18 @@ def _validate(config: Config) -> None:
         )
     if not 0 <= config.amplifier.local_phono_volume <= 100:
         raise ValueError("amplifier.local_phono_volume must be between 0 and 100")
+    control_pins = (
+        config.controls.encoder_a_gpio,
+        config.controls.encoder_b_gpio,
+        config.controls.encoder_button_gpio,
+    )
+    if any(not 0 <= pin <= 27 for pin in control_pins):
+        raise ValueError("controls GPIO pins must use BCM numbers 0..27")
+    if len(set(control_pins)) != len(control_pins):
+        raise ValueError("controls GPIO pins must be distinct")
+    if not 1 <= config.controls.volume_step <= 10:
+        raise ValueError("controls.volume_step must be between 1 and 10")
+    if not 0 <= config.controls.encoder_bounce_ms <= 50:
+        raise ValueError("controls.encoder_bounce_ms must be between 0 and 50")
+    if not 0 <= config.controls.button_bounce_ms <= 500:
+        raise ValueError("controls.button_bounce_ms must be between 0 and 500")

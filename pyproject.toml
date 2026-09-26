@@ -12,6 +12,8 @@ requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.11,<4",
   "aiosendspin>=9.1,<10",
+  "gpiozero>=2,<3",
+  "lgpio>=0.2.2.0; platform_system == 'Linux'",
   "music-assistant-client>=1.5,<2",
 ]
 

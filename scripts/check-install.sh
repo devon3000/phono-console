@@ -32,6 +32,23 @@ with open(sys.argv[1], "rb") as handle:
     print(tomllib.load(handle).get("audio_engine", {}).get("backend", "legacy"))
 PY
 )"
+controls_enabled="$(python3 - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    print(str(tomllib.load(handle).get("controls", {}).get("enabled", False)).lower())
+PY
+)"
+if [[ "$controls_enabled" == "true" ]]; then
+  if ! compgen -G '/dev/gpiochip*' >/dev/null; then
+    echo "Hardware controls are enabled but no GPIO character device exists." >&2
+    exit 1
+  fi
+  if ! id -nG phono-console | tr ' ' '\n' | grep -qx gpio; then
+    echo "The phono-console user is not in the gpio group." >&2
+    exit 1
+  fi
+  echo "hardware controls: enabled"
+fi
 if [[ "$audio_engine_backend" == "timestamped" ]]; then
   systemctl is-enabled phono-console-audio-engine.service
   systemctl is-active phono-console-audio-engine.service

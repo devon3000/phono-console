@@ -133,11 +133,12 @@ if ! getent group phono-console >/dev/null; then
   groupadd --system phono-console
 fi
 getent group bluetooth >/dev/null || groupadd --system bluetooth
+getent group gpio >/dev/null || groupadd --system gpio
 if ! id phono-console >/dev/null 2>&1; then
-  useradd --system --gid phono-console --groups audio,bluetooth,video \
+  useradd --system --gid phono-console --groups audio,bluetooth,gpio,video \
     --home-dir /var/lib/phono-console --shell /usr/sbin/nologin phono-console
 else
-  usermod -a -G audio,bluetooth,video phono-console
+  usermod -a -G audio,bluetooth,gpio,video phono-console
 fi
 install -d -o phono-console -g phono-console -m 0750 /var/lib/phono-console
 chown -R phono-console:phono-console /var/lib/phono-console
@@ -365,6 +366,16 @@ wake_settle_seconds = 0.0
 volume_min = 15
 volume_max = 45
 local_phono_volume = 50
+
+[controls]
+enabled = false
+encoder_a_gpio = 17
+encoder_b_gpio = 27
+encoder_button_gpio = 22
+volume_step = 2
+reverse = false
+encoder_bounce_ms = 2
+button_bounce_ms = 40
 EOF
 
 fi
@@ -376,6 +387,21 @@ fi
 if [[ -z "$(config_value sendspin limiter_ceiling_dbfs 2>/dev/null || true)" ]]; then
   sed -i '/^bluetooth_gain_db = /a limiter_ceiling_dbfs = -1.0\nlimiter_release_ms = 250' \
     "$CONFIG_FILE"
+fi
+
+if ! grep -q '^\[controls\]' "$CONFIG_FILE"; then
+  cat >>"$CONFIG_FILE" <<'EOF'
+
+[controls]
+enabled = false
+encoder_a_gpio = 17
+encoder_b_gpio = 27
+encoder_button_gpio = 22
+volume_step = 2
+reverse = false
+encoder_bounce_ms = 2
+button_bounce_ms = 40
+EOF
 fi
 
 # Preserved configurations may still name raw hardware (or the legacy null

@@ -18,6 +18,13 @@ from .audio_engine_backend import TimestampedBluetoothBackend
 from .amplifier import CecAmplifier
 from .bluetooth import BluetoothManager
 from .config import Config
+from .controls import (
+    HardwareControls,
+    PressCommand,
+    VolumeTarget,
+    press_command_for_route,
+    volume_target_for_route,
+)
 from .controller import Controller
 from .event_sinks import CompositeEventSink
 from .events import LoggingEventSink
@@ -457,6 +464,12 @@ async def run_daemon(config: Config) -> None:
         volume=None,
         muted=None,
     )
+    await state.set_component(
+        "hardware_controls",
+        "degraded" if config.controls.enabled else "ok",
+        "starting" if config.controls.enabled else "disabled",
+        enabled=config.controls.enabled,
+    )
     await amplifier.start()
     await state.set_music_assistant_state(
         {
@@ -536,6 +549,105 @@ async def run_daemon(config: Config) -> None:
                         "phono_output_remote_stop_unconfirmed", {"error": str(exc)}
                     )
 
+    async def hardware_volume_action(delta: int) -> None:
+        status = state.status
+        route = status.route if status is not None else Route.IDLE
+        target_kind = volume_target_for_route(route)
+        if target_kind is VolumeTarget.DOWNSTAIRS:
+            current = await music_assistant.get_player_volume(
+                config.routing.distribution_target
+            )
+            if current is None:
+                raise RuntimeError(
+                    f"volume unavailable for {config.routing.distribution_target}"
+                )
+            target = max(0, min(100, current + delta))
+            if not await music_assistant.set_group_volume(
+                config.routing.distribution_target, target
+            ):
+                raise RuntimeError(
+                    f"player not found: {config.routing.distribution_target}"
+                )
+            await events.emit(
+                "hardware_volume_changed",
+                {
+                    "target": "music_assistant",
+                    "player": config.routing.distribution_target,
+                    "volume": target,
+                },
+            )
+            return
+
+        if target_kind is VolumeTarget.NONE:
+            await events.emit(
+                "hardware_volume_ignored", {"route": route.value}
+            )
+            return
+        if route is Route.LOCAL_PHONO:
+            current = local_phono_volume
+        else:
+            amplifier_state = state.components.get("amplifier", {})
+            reported = amplifier_state.get("volume")
+            current = int(reported) if reported is not None else 50
+        volume, muted = await amplifier_volume_action(
+            max(0, min(100, current + delta)), "hardware_encoder"
+        )
+        await events.emit(
+            "hardware_volume_changed",
+            {"target": "yamaha", "volume": volume, "muted": muted},
+        )
+
+    async def hardware_press_action() -> None:
+        status = state.status
+        route = status.route if status is not None else Route.IDLE
+        command = press_command_for_route(route)
+        if command is PressCommand.PHONO_DOWNSTAIRS:
+            await phono_output_action(PhonoOutputMode.DOWNSTAIRS)
+            await state.set_phono_output_mode(PhonoOutputMode.DOWNSTAIRS)
+            await events.emit(
+                "phono_output_mode_changed",
+                {
+                    "mode": PhonoOutputMode.DOWNSTAIRS.value,
+                    "source": "hardware_encoder",
+                },
+            )
+        elif command is PressCommand.PHONO_LOCAL:
+            await phono_output_action(PhonoOutputMode.LOCAL)
+            await state.set_phono_output_mode(PhonoOutputMode.LOCAL)
+            await events.emit(
+                "phono_output_mode_changed",
+                {
+                    "mode": PhonoOutputMode.LOCAL.value,
+                    "source": "hardware_encoder",
+                },
+            )
+        elif command is PressCommand.STOP_BLUETOOTH:
+            if route is Route.DISTRIBUTED_BLUETOOTH:
+                await music_assistant.stop_players(
+                    (config.routing.distribution_target,)
+                )
+                # Music Assistant's source.stop is forwarded to AVRCP by the
+                # source publisher, keeping the phone and group transition in
+                # one ordered control path.
+            else:
+                await bluetooth_manager.media_command("pause")
+        elif command is PressCommand.STOP_MA:
+            await music_assistant.stop_players(
+                (config.routing.distribution_target,)
+            )
+        else:
+            await events.emit(
+                "hardware_button_ignored", {"route": route.value}
+            )
+
+    hardware_controls = HardwareControls(
+        config.controls,
+        events,
+        state,
+        hardware_volume_action,
+        hardware_press_action,
+    )
+
     api = ControlApi(
         state,
         None,
@@ -580,7 +692,11 @@ async def run_daemon(config: Config) -> None:
         {"api_host": config.runtime.api_host, "api_port": config.runtime.api_port},
     )
     try:
-        tasks = [controller.run(stop), bluetooth_manager.run(stop)]
+        tasks = [
+            controller.run(stop),
+            bluetooth_manager.run(stop),
+            hardware_controls.run(stop),
+        ]
         if timestamped_bluetooth is not None:
             tasks.append(timestamped_bluetooth.run(stop, state))
         if publisher is not None:
