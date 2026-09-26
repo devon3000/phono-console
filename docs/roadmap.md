@@ -87,8 +87,11 @@ Detailed design, staging, test criteria, and rollback are maintained in
 - The volume API and route-dependent volume ownership are implemented.
 - Mechanical layout and control semantics are documented in
   [Cabinet hardware controls](hardware-controls.md).
-- Select the encoder GPIO pins and detachable connector pinout on the bench.
-- Add a disabled-by-default GPIO worker with quadrature, debounce, acceleration,
-  and push-switch tests.
+- GPIO17/GPIO27/GPIO22 are assigned to encoder A/B/switch; the common return is
+  ground.
+- A disabled-by-default GPIO worker with quadrature decoding, debounce, rapid
+  detent coalescing, route-aware volume, and push-switch control is implemented.
+- Bench-test direction and bounce behavior with the physical PEC11H; set the
+  configuration's `reverse` flag if necessary.
 - Finalize the straight-line three-LED PCB only after checking a full-size
   drilling template against the false drawer.

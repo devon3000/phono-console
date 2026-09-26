@@ -59,6 +59,18 @@ volume_min = 15
 volume_max = 45
 local_phono_volume = 50
 
+[controls]
+# BCM numbering. Connect PEC11H A/B to GPIO 17/27, encoder C to GND,
+# one switch terminal to GPIO 22, and the other switch terminal to GND.
+enabled = false
+encoder_a_gpio = 17
+encoder_b_gpio = 27
+encoder_button_gpio = 22
+volume_step = 2
+reverse = false
+encoder_bounce_ms = 2
+button_bounce_ms = 40
+
 [music_assistant]
 base_url = "http://music-assistant.local"
 console_player = "Phono Console"

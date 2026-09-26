@@ -94,6 +94,21 @@ def test_named_group_volume_is_clamped_and_sent() -> None:
     asyncio.run(scenario())
 
 
+def test_named_group_volume_can_be_read() -> None:
+    async def scenario() -> None:
+        state = MusicAssistantState(
+            "http://ma", None, "Phono Console", SimulatedEventSink()
+        )
+        client = FakeClient()
+        state._client = client  # type: ignore[assignment]
+        state._ensure_connected = _noop  # type: ignore[method-assign]
+        client.players.players[0].group_volume = 37
+        assert await state.get_player_volume("Phono Console") == 37
+        assert await state.get_player_volume("Missing") is None
+
+    asyncio.run(scenario())
+
+
 def test_console_status_caches_ma_volume_for_route_handoff() -> None:
     async def scenario() -> None:
         state = MusicAssistantState(

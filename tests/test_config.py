@@ -20,3 +20,8 @@ def test_example_configuration_loads() -> None:
     assert not config.bluetooth.enabled
     assert config.routing.distribution_target == "Downstairs"
     assert config.routing.local_fallback_enabled
+    assert not config.controls.enabled
+    assert config.controls.encoder_a_gpio == 17
+    assert config.controls.encoder_b_gpio == 27
+    assert config.controls.encoder_button_gpio == 22
+    assert config.controls.volume_step == 2

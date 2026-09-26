@@ -52,15 +52,15 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     assert "cec-volume-hook" in installer
     hook = (ROOT / "scripts" / "cec-volume-hook.sh").read_text()
     assert "X-Phono-Volume-Source: music_assistant" in hook
-    assert "--groups audio,bluetooth,video" in installer
-    assert "-G audio,bluetooth,video" in installer
+    assert "--groups audio,bluetooth,gpio,video" in installer
+    assert "-G audio,bluetooth,gpio,video" in installer
     assert '[amplifier]' in installer
     assert 'cec_device = "/dev/cec0"' in installer
     player_unit = (ROOT / "systemd" / "phono-console-player.service").read_text()
     assert "--hook-set-volume" in player_unit
     assert "--hardware-volume false" in player_unit
     router_unit = (ROOT / "systemd" / "phono-console.service").read_text()
-    assert "SupplementaryGroups=audio video" in router_unit
+    assert "SupplementaryGroups=audio video gpio" in router_unit
     assert "sed '/^hw:CARD=Loopback,/d'" in installer
     assert 'PHONO_PLAYER_AUDIO_DEVICE="console_ma_playback"' in installer
     assert "type dmix" not in installer

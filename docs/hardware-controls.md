@@ -26,11 +26,44 @@ The push switch toggles output routing rather than source selection:
 - active Downstairs/Bluetooth playback: stop the active distributed playback;
 - idle: no action.
 
-Software GPIO activation is intentionally deferred until the actual BCM pin
-assignment and connector pinout are selected. This prevents an installer
-upgrade from claiming or driving arbitrary Raspberry Pi pins. The first bench
-stage can connect only encoder A, encoder B, switch, and ground; the LED PCB is
-not required.
+The first bench stage connects only encoder A, encoder B, switch, and ground;
+the LED PCB is not required.
+
+## Encoder wiring
+
+Use BCM numbering (not physical header numbers):
+
+| PEC11H terminal | Raspberry Pi 5 |
+| --- | --- |
+| A | GPIO17, physical pin 11 |
+| B | GPIO27, physical pin 13 |
+| C/common | Ground, physical pin 14 |
+| S or W | GPIO22, physical pin 15 |
+| Remaining switch terminal | Ground, physical pin 14 |
+
+The inputs use the Pi's internal pull-ups. Do not connect any encoder terminal
+to 5 V. If clockwise rotation lowers the volume, set `reverse = true` rather
+than swapping wiring inside the cabinet.
+
+After installing the current release, enable the module in
+`/etc/phono-console/config.toml`:
+
+```toml
+[controls]
+enabled = true
+encoder_a_gpio = 17
+encoder_b_gpio = 27
+encoder_button_gpio = 22
+volume_step = 2
+reverse = false
+encoder_bounce_ms = 2
+button_bounce_ms = 40
+```
+
+Then restart `phono-console.service`. The service reports `encoder ready` in
+the dashboard health data and emits structured turn, press, volume, and mode
+events to its journal. GPIO setup failure degrades only the hardware-control
+component; audio routing continues to run.
 
 ## Indicators
 
@@ -46,16 +79,9 @@ The three indicators retain the agreed state language:
 Transient connection and failure states should blink the affected source LED;
 the normal steady combinations remain unambiguous without labels.
 
-## Before enabling GPIO
-
-Record these decisions in configuration and the installation check:
-
-1. BCM pin for encoder A;
-2. BCM pin for encoder B;
-3. BCM pin for the push switch;
-4. connector pin order, including ground;
-5. whether the chosen encoder breakout needs external pull-ups; and
-6. direction convention when viewed from the cabinet front.
-
-Then add a disabled-by-default GPIO worker, quadrature/debounce tests, service
-permissions for the Pi GPIO character device, and an installer wiring check.
+The GPIO worker is disabled by default, uses the Pi GPIO character device, and
+coalesces rapid detents before making Music Assistant network calls. Rotation
+changes local Yamaha volume during local playback and the Downstairs group
+volume during synchronized playback. The push switch toggles phono between
+Console and Downstairs, pauses Bluetooth, stops ordinary MA playback, and does
+nothing while idle.

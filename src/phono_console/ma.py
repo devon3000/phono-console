@@ -246,6 +246,19 @@ class MusicAssistantState:
         )
         return True
 
+    async def get_player_volume(self, player_name: str) -> int | None:
+        """Return the current logical volume for a named player or group."""
+        await self._ensure_connected()
+        player = self._find_named_player(player_name)
+        if player is None:
+            await self.events.emit("ma_player_missing", {"player": player_name})
+            return None
+        for attribute in ("group_volume", "volume_level"):
+            value = getattr(player, attribute, None)
+            if value is not None:
+                return max(0, min(100, int(value)))
+        return None
+
     async def whole_house_is_requested(self) -> bool:
         if self.state is not None:
             return self.state.whole_house_requested

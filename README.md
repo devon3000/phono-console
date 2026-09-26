@@ -242,3 +242,11 @@ service if Music Assistant does not immediately re-handshake.
 See [docs/design.md](docs/design.md) and [docs/roadmap.md](docs/roadmap.md).
 The planned encoder, switch, LED meanings, and cabinet mounting constraints are
 documented in [docs/hardware-controls.md](docs/hardware-controls.md).
+
+The PEC11H encoder is supported without the LED board. It is disabled by
+default and uses configurable BCM GPIO pins (17/27 for quadrature and 22 for
+the switch by default). Rotation follows the active route: local playback
+controls the Yamaha, while synchronized playback controls the Music Assistant
+Downstairs group. Pressing toggles local/synchronized phono or stops the active
+Bluetooth/MA source. See the hardware-controls document for wiring and the
+configuration block.
