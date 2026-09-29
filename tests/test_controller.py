@@ -40,7 +40,9 @@ def test_controller_applies_only_changed_routes() -> None:
         ma.playing = True
         await subject.tick(now=3)
         assert router.routes[-1] is Route.LOCAL_PHONO
-        assert [event for event, _ in events.events] == [
+        assert [
+            event for event, _ in events.events if event == "route_changed"
+        ] == [
             "route_changed",
             "route_changed",
         ]

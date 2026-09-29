@@ -4,8 +4,9 @@ The publisher keeps one source-role connection to the configured Sendspin
 server and streams the shared ALSA capture only while the server requests it
 (``server/command`` ``source.start``/``source.stop``), which is how the
 Music Assistant ``sendspin_source`` plugin drives playback. Line-sense signal
-state is reported from the controller's phono-activity decision so Music
-Assistant can offer autostart on a configured target group.
+state initially follows the controller's phono-activity decision. Once a phono
+stream is flowing, activity measured from the exact PCM being transmitted is
+authoritative so a stale dashboard meter cannot tear down a healthy session.
 """
 
 from __future__ import annotations
@@ -23,7 +24,9 @@ from typing import Protocol
 from .alsa import CaptureUnavailable
 from .audio_engine_protocol import FrameFlags, TimestampedPcm
 from .config import AudioConfig, SendspinConfig
+from .detector import ActivityDetector
 from .interfaces import EventSink
+from .pcm import rms_dbfs_s16le
 from .policy import Source
 from .state import StateStore
 
@@ -206,6 +209,9 @@ class SendspinSourcePublisher:
         bluetooth_media: BluetoothMedia | None = None,
         source_stop_action: SourceStopAction | None = None,
         phono_stop_grace_seconds: float = 1.0,
+        phono_activity_threshold_dbfs: float | None = None,
+        phono_activity_release_seconds: float = 180.0,
+        phono_activity_hysteresis_db: float = 6.0,
     ) -> None:
         self.config = sendspin
         self.audio = audio
@@ -245,6 +251,19 @@ class SendspinSourcePublisher:
         self._phono_stop_task: asyncio.Task[None] | None = None
         self._bluetooth_pause_latched = False
         self._bluetooth_pause_observed = False
+        self._stream_activity_detector = (
+            ActivityDetector(
+                threshold_dbfs=phono_activity_threshold_dbfs,
+                attack_seconds=0.0,
+                release_seconds=phono_activity_release_seconds,
+                hysteresis_db=phono_activity_hysteresis_db,
+            )
+            if phono_activity_threshold_dbfs is not None
+            else None
+        )
+        self._stream_activity_level_dbfs = -120.0
+        self._stream_activity_updated_at: float | None = None
+        self._stream_activity_seen_present = False
 
     @property
     def phono_stop_pending(self) -> bool:
@@ -307,6 +326,7 @@ class SendspinSourcePublisher:
         was_requested = self._stream_requested
         await self._stop_streaming()
         self._selected_source = source
+        self._reset_stream_activity()
         self._stream_requested = was_requested
         await self.events.emit("sendspin_source_selected", {"source": source.value})
         if was_requested:
@@ -366,6 +386,13 @@ class SendspinSourcePublisher:
             await self.events.emit("sendspin_source_pairing_opened", {})
 
     async def _publish_state(self) -> None:
+        activity_age_seconds = None
+        if self._stream_activity_updated_at is not None:
+            activity_age_seconds = max(
+                0.0,
+                asyncio.get_running_loop().time()
+                - self._stream_activity_updated_at,
+            )
         await self.state.set_source_state(
             {
                 "connected": self._connected,
@@ -376,6 +403,15 @@ class SendspinSourcePublisher:
                 "phono_stop_pending": self.phono_stop_pending,
                 "error": self._stream_error,
                 "selected_source": self._selected_source.value,
+                "pcm_activity": (
+                    self._stream_activity_detector.active
+                    if self._streaming
+                    and self._stream_activity_seen_present
+                    and self._stream_activity_detector is not None
+                    else None
+                ),
+                "pcm_level_dbfs": self._stream_activity_level_dbfs,
+                "pcm_activity_age_seconds": activity_age_seconds,
             }
         )
         await self.state.set_component(
@@ -479,6 +515,7 @@ class SendspinSourcePublisher:
                 return
             self._stream_error = None
             self._streaming = True
+            self._reset_stream_activity()
             self._stream_task = asyncio.create_task(
                 self._pump(capture), name="sendspin-source-stream"
             )
@@ -519,12 +556,14 @@ class SendspinSourcePublisher:
                         raise CaptureUnavailable(
                             "timestamped source capture crossed a discontinuity"
                         )
+                    await self._observe_stream_activity(chunk.pcm)
                     pcm = limiter.process(chunk.pcm)
                     timestamp_us = chunk.first_sample_time_us
                     frames = chunk.frames
                     await capture.feed(pcm, capture_timestamp_us=timestamp_us)
                     captured_frames += frames
                     continue
+                await self._observe_stream_activity(chunk)
                 pcm = limiter.process(chunk)
                 frames = len(pcm) // frame_stride
                 if capture_anchor_us is None:
@@ -566,10 +605,46 @@ class SendspinSourcePublisher:
                         "sendspin_source_stream_failed", {"error": error}
                     )
                 if was_streaming:
+                    self._reset_stream_activity()
                     await self.events.emit("sendspin_source_stream_stopped", {})
                     await self._publish_state()
                 if error is not None and self._stream_requested:
                     self._schedule_stream_retry()
+
+    def _reset_stream_activity(self) -> None:
+        detector = self._stream_activity_detector
+        if detector is not None:
+            detector.reset_inactive()
+        self._stream_activity_level_dbfs = -120.0
+        self._stream_activity_updated_at = None
+        self._stream_activity_seen_present = False
+
+    async def _observe_stream_activity(self, pcm: bytes) -> None:
+        """Measure the source PCM that is about to be sent to Sendspin."""
+        detector = self._stream_activity_detector
+        if detector is None or self._selected_source is not Source.PHONO:
+            return
+        now = asyncio.get_running_loop().time()
+        level = rms_dbfs_s16le(pcm)
+        was_active = detector.active
+        is_active = detector.update(level, now)
+        self._stream_activity_level_dbfs = level
+        self._stream_activity_updated_at = now
+        if is_active:
+            self._stream_activity_seen_present = True
+        if is_active != was_active:
+            await self.events.emit(
+                "sendspin_pcm_activity_changed",
+                {
+                    "active": is_active,
+                    "source": Source.PHONO.value,
+                    "origin": "sendspin_pcm",
+                    "level_dbfs": level,
+                    "threshold_dbfs": detector.threshold_dbfs,
+                    "release_seconds": detector.release_seconds,
+                },
+            )
+            await self._publish_state()
 
     def _schedule_stream_retry(self) -> None:
         if (
@@ -676,6 +751,18 @@ class SendspinSourcePublisher:
                 if status is not None
                 else False
             )
+            detector = self._stream_activity_detector
+            if (
+                self._selected_source is Source.PHONO
+                and self._streaming
+                and self._stream_requested
+                and detector is not None
+                and self._stream_activity_seen_present
+            ):
+                # The PCM pump sees the exact audio MA is receiving. Once it
+                # has observed real phono activity, it is authoritative until
+                # that PCM remains quiet for the full configured release.
+                detected = detector.active
             source_enabled = self._source_distribution_enabled.get(
                 self._selected_source, True
             )

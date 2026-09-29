@@ -117,6 +117,25 @@ async def endless_pcm():
         await asyncio.sleep(0)
 
 
+def pcm_at_amplitude(amplitude: int) -> bytes:
+    return array("h", [amplitude, -amplitude] * 960).tobytes()
+
+
+async def endless_audible_pcm():
+    while True:
+        yield pcm_at_amplitude(5000)
+        await asyncio.sleep(0)
+
+
+async def audible_then_silent_pcm():
+    for _ in range(5):
+        yield pcm_at_amplitude(5000)
+        await asyncio.sleep(0.005)
+    while True:
+        yield pcm_at_amplitude(0)
+        await asyncio.sleep(0.005)
+
+
 async def finite_pcm():
     yield b"\x00\x00" * 2 * 960
 
@@ -547,6 +566,109 @@ def test_failed_line_sense_send_is_retried() -> None:
         assert any(
             name == "sendspin_source_signal_failed" for name, _ in events.events
         )
+
+    asyncio.run(scenario())
+
+
+def test_stream_pcm_activity_overrides_false_level_monitor_inactivity() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        events = SimulatedEventSink()
+        state = StateStore()
+
+        async def factory():
+            return client
+
+        publisher = SendspinSourcePublisher(
+            SENDSPIN,
+            AUDIO,
+            events,
+            state,
+            client_factory=factory,
+            pcm_stream_factory=endless_audible_pcm,
+            signal_poll_seconds=0.01,
+            signal_release_seconds=0.02,
+            phono_activity_threshold_dbfs=-45.0,
+            phono_activity_release_seconds=0.03,
+            phono_activity_hysteresis_db=6.0,
+        )
+        await state.set_status(
+            Status(Route.DISTRIBUTED_PHONO, True, True, False, -30.0)
+        )
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.03)
+        client.command("start")
+        await asyncio.sleep(0.04)
+        assert publisher._stream_activity_seen_present
+
+        # Simulate the independent dashboard/controller monitor falsely
+        # declaring silence while the PCM sent to MA remains clearly audible.
+        await state.set_status(
+            Status(Route.DISTRIBUTED_PHONO, False, True, False, -120.0)
+        )
+        await asyncio.sleep(0.08)
+
+        assert [signal.value for signal in client.signals] == ["present"]
+        assert any(
+            name == "sendspin_pcm_activity_changed"
+            and payload["active"] is True
+            and payload["origin"] == "sendspin_pcm"
+            for name, payload in events.events
+        )
+        stop.set()
+        await asyncio.wait_for(run, timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_stream_pcm_silence_eventually_reports_absent() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        events = SimulatedEventSink()
+        state = StateStore()
+
+        async def factory():
+            return client
+
+        publisher = SendspinSourcePublisher(
+            SENDSPIN,
+            AUDIO,
+            events,
+            state,
+            client_factory=factory,
+            pcm_stream_factory=audible_then_silent_pcm,
+            signal_poll_seconds=0.005,
+            signal_release_seconds=0.005,
+            phono_activity_threshold_dbfs=-45.0,
+            phono_activity_release_seconds=0.03,
+            phono_activity_hysteresis_db=6.0,
+        )
+        await state.set_status(
+            Status(Route.DISTRIBUTED_PHONO, True, True, False, -30.0)
+        )
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.02)
+        client.command("start")
+        await asyncio.sleep(0.03)
+        await state.set_status(
+            Status(Route.DISTRIBUTED_PHONO, False, True, False, -120.0)
+        )
+        await asyncio.sleep(0.08)
+
+        assert [signal.value for signal in client.signals] == [
+            "present",
+            "absent",
+        ]
+        transitions = [
+            payload["active"]
+            for name, payload in events.events
+            if name == "sendspin_pcm_activity_changed"
+        ]
+        assert transitions == [True, False]
+        stop.set()
+        await asyncio.wait_for(run, timeout=2)
 
     asyncio.run(scenario())
 

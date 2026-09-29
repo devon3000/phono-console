@@ -266,6 +266,13 @@ async def run_daemon(config: Config) -> None:
                 bluetooth_manager if config.bluetooth.enabled else None
             ),
             source_stop_action=source_stopped,
+            phono_activity_threshold_dbfs=(
+                config.detection.phono_threshold_dbfs
+            ),
+            phono_activity_release_seconds=(
+                config.detection.release_ms / 1000
+            ),
+            phono_activity_hysteresis_db=config.detection.hysteresis_db,
         )
         await publisher.set_distribution_enabled(not state.local_playback_only)
         await publisher.set_source_distribution_enabled(

@@ -97,6 +97,7 @@ class Controller:
         self._distribution_healthy_since: float | None = None
         self._distribution_pending_source: Source | None = None
         self._distribution_pending_since: float | None = None
+        self._last_reported_phono_activity: bool | None = None
 
     async def _distribution_ready(self, now: float) -> bool:
         if self.distribution_available is None:
@@ -171,6 +172,21 @@ class Controller:
                 },
             )
         phono_active = capture_ok and self.detector.update(level, timestamp)
+        if phono_active != self._last_reported_phono_activity:
+            await self.event_sink.emit(
+                "phono_activity_changed",
+                {
+                    "active": phono_active,
+                    "origin": "level_monitor",
+                    "level_dbfs": level,
+                    "threshold_dbfs": (
+                        self.config.detection.phono_threshold_dbfs
+                    ),
+                    "release_ms": self.config.detection.release_ms,
+                    "capture_ok": capture_ok,
+                },
+            )
+            self._last_reported_phono_activity = phono_active
         phono_signal_present = bool(
             capture_ok
             and (
