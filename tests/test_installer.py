@@ -85,8 +85,16 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     ).read_text()
     assert "phono-audio-engine serve" in engine_unit
     assert "RuntimeDirectory=phono-console" in engine_unit
-    for package in ("curl", "ffmpeg", "libportaudio2", "swig"):
+    for package in ("curl", "ffmpeg", "libportaudio2", "python3-lgpio"):
         assert package in installer
+    assert 'python3 -m venv --system-site-packages "$release_dir/venv"' in installer
+    assert '"$release_dir/venv/bin/python" -c \'import lgpio\'' in installer
+
+
+def test_lgpio_comes_from_raspberry_pi_os_not_pypi() -> None:
+    project = (ROOT / "pyproject.toml").read_text()
+    assert '"gpiozero>=2,<3"' in project
+    assert '"lgpio>=' not in project
 
 
 def test_reconfiguration_preserves_existing_music_assistant_defaults() -> None:

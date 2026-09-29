@@ -122,7 +122,7 @@ echo "Installing system packages..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   alsa-utils bluez bluez-alsa-utils build-essential cec-utils curl ffmpeg libasound2-dev \
-  libportaudio2 libsamplerate0-dev pkg-config python3 python3-venv rfkill swig
+  libportaudio2 libsamplerate0-dev pkg-config python3 python3-lgpio python3-venv rfkill
 
 modprobe snd-aloop
 cat >/etc/modules-load.d/phono-console.conf <<'EOF'
@@ -154,7 +154,14 @@ install -d -m 0755 "$APP_DIR" "$APP_DIR/releases" "$CONFIG_DIR"
 release_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 release_dir="$APP_DIR/releases/$release_id"
 install -d -m 0755 "$release_dir"
-python3 -m venv "$release_dir/venv"
+# Raspberry Pi OS ships lgpio as a native Python package.  Inherit system
+# packages so the venv uses that ABI-matched build instead of compiling the
+# PyPI wrapper and C library during every release installation.
+python3 -m venv --system-site-packages "$release_dir/venv"
+if ! "$release_dir/venv/bin/python" -c 'import lgpio'; then
+  echo "The Raspberry Pi OS python3-lgpio package is unavailable." >&2
+  exit 1
+fi
 "$release_dir/venv/bin/pip" install --upgrade pip
 "$release_dir/venv/bin/pip" install "$SOURCE_DIR"
 
