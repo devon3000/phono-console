@@ -85,7 +85,7 @@ def test_installer_offers_audio_devices_and_always_enables_services() -> None:
     ).read_text()
     assert "phono-audio-engine serve" in engine_unit
     assert "RuntimeDirectory=phono-console" in engine_unit
-    for package in ("curl", "ffmpeg", "libportaudio2"):
+    for package in ("curl", "ffmpeg", "libportaudio2", "swig"):
         assert package in installer
 
 
