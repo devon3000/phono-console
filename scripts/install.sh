@@ -357,6 +357,7 @@ phono_gain_db = 6.0
 bluetooth_gain_db = 6.0
 limiter_ceiling_dbfs = -1.0
 limiter_release_ms = 250
+source_timeline_lead_ms = 3000
 
 [runtime]
 poll_interval_ms = 100
@@ -393,6 +394,10 @@ if [[ -z "$(config_value sendspin phono_gain_db 2>/dev/null || true)" ]]; then
 fi
 if [[ -z "$(config_value sendspin limiter_ceiling_dbfs 2>/dev/null || true)" ]]; then
   sed -i '/^bluetooth_gain_db = /a limiter_ceiling_dbfs = -1.0\nlimiter_release_ms = 250' \
+    "$CONFIG_FILE"
+fi
+if [[ -z "$(config_value sendspin source_timeline_lead_ms 2>/dev/null || true)" ]]; then
+  sed -i '/^limiter_release_ms = /a source_timeline_lead_ms = 3000' \
     "$CONFIG_FILE"
 fi
 

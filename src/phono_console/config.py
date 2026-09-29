@@ -67,6 +67,7 @@ class SendspinConfig:
     bluetooth_gain_db: float = 6.0
     limiter_ceiling_dbfs: float = -1.0
     limiter_release_ms: int = 250
+    source_timeline_lead_ms: int = 3000
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,9 @@ def load_config(path: Path) -> Config:
                 sendspin.get("limiter_ceiling_dbfs", -1.0)
             ),
             limiter_release_ms=int(sendspin.get("limiter_release_ms", 250)),
+            source_timeline_lead_ms=int(
+                sendspin.get("source_timeline_lead_ms", 3000)
+            ),
         ),
         bluetooth=BluetoothConfig(
             enabled=bool(bluetooth.get("enabled", False)),
@@ -324,6 +328,10 @@ def _validate(config: Config) -> None:
         )
     if not 10 <= config.sendspin.limiter_release_ms <= 5000:
         raise ValueError("sendspin.limiter_release_ms must be between 10 and 5000")
+    if not 0 <= config.sendspin.source_timeline_lead_ms <= 10_000:
+        raise ValueError(
+            "sendspin.source_timeline_lead_ms must be between 0 and 10000"
+        )
     if config.audio_engine.backend not in {"legacy", "timestamped"}:
         raise ValueError("audio_engine.backend must be legacy or timestamped")
     if not config.audio_engine.socket_path.startswith("/"):

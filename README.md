@@ -151,6 +151,13 @@ from clipping, its release is smoothed across source blocks, and it adds no
 samples of delay or timestamp shift. The default ceiling is -1 dBFS with a
 250 ms release.
 
+Distributed source timestamps include a configurable presentation lead
+(`source_timeline_lead_ms`, 3000 ms by default). This gives Music Assistant's
+Sendspin-to-AirPlay bridges enough time to establish their required playback
+buffer instead of discarding the beginning of a live source. It does not affect
+the direct low-latency phono route; it intentionally adds latency only to
+synchronized Downstairs playback.
+
 Run the target probe on the Raspberry Pi with:
 
 ```bash

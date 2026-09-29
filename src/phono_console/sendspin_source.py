@@ -519,7 +519,14 @@ class SendspinSourcePublisher:
             self._stream_task = asyncio.create_task(
                 self._pump(capture), name="sendspin-source-stream"
             )
-            await self.events.emit("sendspin_source_stream_started", {})
+            await self.events.emit(
+                "sendspin_source_stream_started",
+                {
+                    "timeline_lead_ms": (
+                        self.config.source_timeline_lead_ms
+                    )
+                },
+            )
             await self._publish_state()
 
     @staticmethod
@@ -537,6 +544,7 @@ class SendspinSourcePublisher:
         capture_anchor_us: int | None = None
         captured_frames = 0
         frame_stride = self.audio.channels * 2
+        timeline_lead_us = self.config.source_timeline_lead_ms * 1000
         gain_db = (
             self.config.bluetooth_gain_db
             if self._selected_source is Source.BLUETOOTH
@@ -558,7 +566,7 @@ class SendspinSourcePublisher:
                         )
                     await self._observe_stream_activity(chunk.pcm)
                     pcm = limiter.process(chunk.pcm)
-                    timestamp_us = chunk.first_sample_time_us
+                    timestamp_us = chunk.first_sample_time_us + timeline_lead_us
                     frames = chunk.frames
                     await capture.feed(pcm, capture_timestamp_us=timestamp_us)
                     captured_frames += frames
@@ -575,9 +583,11 @@ class SendspinSourcePublisher:
                         else int(asyncio.get_running_loop().time() * 1_000_000)
                     )
                     # readexactly returns after the final sample in this block
-                    # was captured; timestamp the first sample, not send time.
+                    # was captured. Anchor the first sample to capture time,
+                    # then add presentation lead for downstream bridges.
                     capture_anchor_us = (
                         now_us - frames * 1_000_000 // self.audio.sample_rate
+                        + timeline_lead_us
                     )
                 timestamp_us = (
                     capture_anchor_us

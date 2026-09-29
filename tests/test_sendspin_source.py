@@ -698,7 +698,7 @@ def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
     asyncio.run(scenario())
 
 
-def test_source_pcm_timestamps_follow_sample_clock_not_send_time() -> None:
+def test_source_pcm_timestamps_follow_sample_clock_with_presentation_lead() -> None:
     async def scenario() -> None:
         client = FakeClient()
         publisher, _, _ = make_publisher(client)
@@ -708,12 +708,12 @@ def test_source_pcm_timestamps_follow_sample_clock_not_send_time() -> None:
 
         await publisher._pump(capture)
 
-        assert capture.timestamps == [980_000, 1_000_000, 1_020_000]
+        assert capture.timestamps == [3_980_000, 4_000_000, 4_020_000]
 
     asyncio.run(scenario())
 
 
-def test_source_forwards_engine_sample_timestamp_unchanged() -> None:
+def test_source_offsets_engine_sample_timestamp_by_presentation_lead() -> None:
     async def timestamped_pcm():
         yield TimestampedPcm(
             AudioSource.BLUETOOTH,
@@ -738,6 +738,6 @@ def test_source_forwards_engine_sample_timestamp_unchanged() -> None:
 
         await publisher._pump(capture)
 
-        assert capture.timestamps == [765_432_100]
+        assert capture.timestamps == [768_432_100]
 
     asyncio.run(scenario())

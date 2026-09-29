@@ -93,6 +93,9 @@ bluetooth_gain_db = 6.0
 # delay and prevents boosted live inputs from clipping before Music Assistant.
 limiter_ceiling_dbfs = -1.0
 limiter_release_ms = 250
+# Schedule live-source PCM far enough ahead for AirPlay bridge players to
+# establish their 2.5-second minimum playback buffer without dropping audio.
+source_timeline_lead_ms = 3000
 
 [runtime]
 poll_interval_ms = 100
