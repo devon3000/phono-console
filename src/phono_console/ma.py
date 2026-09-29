@@ -26,6 +26,7 @@ class MusicAssistantState:
         console_player: str,
         events: EventSink,
         state: StateStore | None = None,
+        play_request_timeout_seconds: float = 5.0,
     ) -> None:
         self.base_url = base_url
         self.token = token
@@ -43,6 +44,13 @@ class MusicAssistantState:
         self._last_console_playing = False
         self._last_console_volume: int | None = None
         self._player_missing_reported = False
+        self._play_request_timeout_seconds = play_request_timeout_seconds
+        self._play_request_lock = asyncio.Lock()
+        self._play_requests: dict[
+            tuple[str, tuple[str, ...]],
+            tuple[int, float, asyncio.Task[list[str]]],
+        ] = {}
+        self._play_request_sequence = 0
 
     async def _publish_state(
         self, connected: bool, error: str | None = None
@@ -203,20 +211,137 @@ class MusicAssistantState:
     async def play_vinyl_source(
         self, source_client_id: str, players: Sequence[str]
     ) -> list[str]:
-        """Start the published vinyl source on the named players/groups."""
-        await self._ensure_connected()
-        assert self._client is not None
-        uri = create_uri(
-            MediaType.AUDIO_SOURCE, SENDSPIN_PROVIDER_DOMAIN, source_client_id
+        """Start the published source once while MA settles the request.
+
+        Controller telemetry can lag behind ``play_media`` by several seconds.
+        Coalesce callers for the same source and targets so that stale state
+        cannot restart a live-input queue while its first start is in flight.
+        """
+        target_names = tuple(players)
+        key = (source_client_id, target_names)
+        loop = asyncio.get_running_loop()
+        suppressed: tuple[int, str, asyncio.Task[list[str]]] | None = None
+        expired_request_id: int | None = None
+
+        async with self._play_request_lock:
+            existing = self._play_requests.get(key)
+            if existing is not None:
+                request_id, retry_at, task = existing
+                if not task.done() or loop.time() < retry_at:
+                    suppressed = (
+                        request_id,
+                        "in_flight" if not task.done() else "settling",
+                        task,
+                    )
+                else:
+                    expired_request_id = request_id
+
+            if suppressed is None:
+                self._play_request_sequence += 1
+                request_id = self._play_request_sequence
+                task = asyncio.create_task(
+                    self._play_vinyl_source_once(
+                        request_id, source_client_id, target_names
+                    ),
+                    name=f"ma-play-source-{request_id}",
+                )
+                self._play_requests[key] = (
+                    request_id,
+                    loop.time() + self._play_request_timeout_seconds,
+                    task,
+                )
+
+        if expired_request_id is not None:
+            await self.events.emit(
+                "ma_play_media_timeout",
+                {
+                    "request_id": expired_request_id,
+                    "source_client_id": source_client_id,
+                    "players": list(target_names),
+                    "timeout_seconds": self._play_request_timeout_seconds,
+                    "action": "retrying",
+                },
+            )
+
+        if suppressed is not None:
+            request_id, reason, task = suppressed
+            await self.events.emit(
+                "ma_play_media_suppressed",
+                {
+                    "request_id": request_id,
+                    "source_client_id": source_client_id,
+                    "players": list(target_names),
+                    "reason": reason,
+                },
+            )
+
+        try:
+            return await asyncio.shield(task)
+        except Exception:
+            async with self._play_request_lock:
+                current = self._play_requests.get(key)
+                if current is not None and current[2] is task:
+                    self._play_requests.pop(key, None)
+            raise
+
+    async def _play_vinyl_source_once(
+        self,
+        request_id: int,
+        source_client_id: str,
+        players: tuple[str, ...],
+    ) -> list[str]:
+        """Submit one observable source playback request to MA."""
+        started_at = asyncio.get_running_loop().time()
+        await self.events.emit(
+            "ma_play_media_submitted",
+            {
+                "request_id": request_id,
+                "source_client_id": source_client_id,
+                "players": list(players),
+            },
         )
         started: list[str] = []
-        for name in players:
-            player = self._find_named_player(name)
-            if player is None:
-                await self.events.emit("ma_player_missing", {"player": name})
-                continue
-            await self._client.player_queues.play_media(player.player_id, uri)
-            started.append(player.player_id)
+        try:
+            await self._ensure_connected()
+            assert self._client is not None
+            uri = create_uri(
+                MediaType.AUDIO_SOURCE,
+                SENDSPIN_PROVIDER_DOMAIN,
+                source_client_id,
+            )
+            for name in players:
+                player = self._find_named_player(name)
+                if player is None:
+                    await self.events.emit("ma_player_missing", {"player": name})
+                    continue
+                await self._client.player_queues.play_media(player.player_id, uri)
+                started.append(player.player_id)
+        except Exception as exc:
+            await self.events.emit(
+                "ma_play_media_failed",
+                {
+                    "request_id": request_id,
+                    "source_client_id": source_client_id,
+                    "players": list(players),
+                    "duration_ms": round(
+                        (asyncio.get_running_loop().time() - started_at) * 1000
+                    ),
+                    "error": str(exc),
+                },
+            )
+            raise
+        await self.events.emit(
+            "ma_play_media_completed",
+            {
+                "request_id": request_id,
+                "source_client_id": source_client_id,
+                "players": list(players),
+                "started_player_ids": started,
+                "duration_ms": round(
+                    (asyncio.get_running_loop().time() - started_at) * 1000
+                ),
+            },
+        )
         return started
 
     async def stop_players(self, players: Sequence[str]) -> list[str]:

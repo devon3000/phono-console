@@ -34,9 +34,12 @@ class FakePlayerQueues:
     def __init__(self):
         self.play_calls: list[tuple[str, str]] = []
         self.stop_calls: list[str] = []
+        self.play_gate: asyncio.Event | None = None
 
     async def play_media(self, queue_id, media, **kwargs):
         self.play_calls.append((queue_id, media))
+        if self.play_gate is not None:
+            await self.play_gate.wait()
 
     async def stop(self, queue_id):
         self.stop_calls.append(queue_id)
@@ -76,6 +79,128 @@ def test_play_vinyl_source_targets_named_players() -> None:
         stopped = await state.stop_players(["console-id"])
         assert stopped == ["console-id"]
         assert client.player_queues.stop_calls == ["console-id"]
+
+    asyncio.run(scenario())
+
+
+def test_play_vinyl_source_coalesces_in_flight_and_settling_requests() -> None:
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        state = MusicAssistantState(
+            "http://ma",
+            None,
+            "Phono Console",
+            events,
+            play_request_timeout_seconds=60,
+        )
+        client = FakeClient()
+        gate = asyncio.Event()
+        client.player_queues.play_gate = gate
+        state._client = client  # type: ignore[assignment]
+        state._ensure_connected = _noop  # type: ignore[method-assign]
+
+        first = asyncio.create_task(
+            state.play_vinyl_source("source-client-id", ["Phono Console"])
+        )
+        await asyncio.sleep(0)
+        second = asyncio.create_task(
+            state.play_vinyl_source("source-client-id", ["Phono Console"])
+        )
+        await asyncio.sleep(0)
+        assert len(client.player_queues.play_calls) == 1
+
+        gate.set()
+        assert await first == ["console-id"]
+        assert await second == ["console-id"]
+        assert await state.play_vinyl_source(
+            "source-client-id", ["Phono Console"]
+        ) == ["console-id"]
+        assert len(client.player_queues.play_calls) == 1
+
+        suppressed = [
+            payload
+            for event, payload in events.events
+            if event == "ma_play_media_suppressed"
+        ]
+        assert [payload["reason"] for payload in suppressed] == [
+            "in_flight",
+            "settling",
+        ]
+        assert sum(
+            event == "ma_play_media_submitted" for event, _payload in events.events
+        ) == 1
+        assert sum(
+            event == "ma_play_media_completed" for event, _payload in events.events
+        ) == 1
+
+    asyncio.run(scenario())
+
+
+def test_failed_play_request_can_retry_immediately() -> None:
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        state = MusicAssistantState(
+            "http://ma",
+            None,
+            "Phono Console",
+            events,
+            play_request_timeout_seconds=60,
+        )
+        client = FakeClient()
+        state._client = client  # type: ignore[assignment]
+        state._ensure_connected = _noop  # type: ignore[method-assign]
+        attempts = 0
+
+        async def fail_once(queue_id, media, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("temporary failure")
+            client.player_queues.play_calls.append((queue_id, media))
+
+        client.player_queues.play_media = fail_once
+        try:
+            await state.play_vinyl_source("source-client-id", ["Phono Console"])
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("first request should fail")
+
+        assert await state.play_vinyl_source(
+            "source-client-id", ["Phono Console"]
+        ) == ["console-id"]
+        assert attempts == 2
+        assert any(event == "ma_play_media_failed" for event, _ in events.events)
+
+    asyncio.run(scenario())
+
+
+def test_settling_timeout_is_logged_before_retry() -> None:
+    async def scenario() -> None:
+        events = SimulatedEventSink()
+        state = MusicAssistantState(
+            "http://ma",
+            None,
+            "Phono Console",
+            events,
+            play_request_timeout_seconds=0,
+        )
+        client = FakeClient()
+        state._client = client  # type: ignore[assignment]
+        state._ensure_connected = _noop  # type: ignore[method-assign]
+
+        await state.play_vinyl_source("source-client-id", ["Phono Console"])
+        await state.play_vinyl_source("source-client-id", ["Phono Console"])
+
+        assert len(client.player_queues.play_calls) == 2
+        timeouts = [
+            payload
+            for event, payload in events.events
+            if event == "ma_play_media_timeout"
+        ]
+        assert len(timeouts) == 1
+        assert timeouts[0]["request_id"] == 1
+        assert timeouts[0]["action"] == "retrying"
 
     asyncio.run(scenario())
 
