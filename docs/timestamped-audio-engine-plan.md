@@ -381,13 +381,13 @@ enables exactly one of `phono-console-audio-engine.service` and the legacy
 Normal timestamped distribution does not start with a local route. On signal
 detection the controller requests the configured MA target immediately, keeps
 the physical output idle until the returned Sendspin player reports playback,
-and then opens only that return path. A bounded 500 ms capture pre-roll is fed
-with its original sample timestamps so MA's default 500 ms source bridge can
-retain the opening audio without trimming startup surplus. If distribution has
-not become ready within the configured startup timeout, the same pre-roll feeds
-the local fallback instead. Capture timestamps are never shifted into the
-future: Sendspin source timestamps describe capture time, not presentation
-time.
+and then opens only that return path. In production, AirPlay bridge players
+require about 2.5 seconds of scheduling lead while a live Sendspin source
+otherwise arrives only a few hundred milliseconds ahead. Until Music Assistant
+provides that bridge prebuffer itself, the source applies the configured
+`source_timeline_lead_ms` presentation offset (3 seconds by default) to every
+forwarded capture timestamp. This preserves one continuous timeline and the
+opening audio at the cost of intentional latency in distributed mode only.
 
 ### Phase 5 — Unified output and cleanup
 
