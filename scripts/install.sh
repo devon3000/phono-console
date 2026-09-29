@@ -122,7 +122,7 @@ echo "Installing system packages..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   alsa-utils bluez bluez-alsa-utils build-essential cec-utils curl ffmpeg libasound2-dev \
-  libportaudio2 libsamplerate0-dev pkg-config python3 python3-venv rfkill
+  libportaudio2 libsamplerate0-dev pkg-config python3 python3-venv rfkill swig
 
 modprobe snd-aloop
 cat >/etc/modules-load.d/phono-console.conf <<'EOF'
