@@ -176,6 +176,9 @@ async def run_daemon(config: Config) -> None:
         config.music_assistant.console_player,
         events,
         state,
+        play_request_timeout_seconds=(
+            config.routing.distribution_start_timeout_ms / 1000
+        ),
     )
 
     async def bluetooth_volume_action(volume: int) -> None:
