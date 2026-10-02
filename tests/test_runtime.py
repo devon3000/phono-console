@@ -4,6 +4,7 @@ from pathlib import Path
 from phono_console.config import load_config
 
 from phono_console.runtime import (
+    distribution_needs_start,
     local_loopback_command,
     system_info,
 )
@@ -25,3 +26,12 @@ def test_system_info_has_dashboard_network_shape() -> None:
     info = system_info()
     assert isinstance(info["hostname"], str)
     assert isinstance(info["addresses"], list)
+
+
+def test_distribution_restarts_when_group_stopped_but_source_request_is_stale() -> None:
+    assert distribution_needs_start(
+        stream_requested=True, console_playing=False
+    )
+    assert not distribution_needs_start(
+        stream_requested=True, console_playing=True
+    )
