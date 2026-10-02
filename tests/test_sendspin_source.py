@@ -2,6 +2,8 @@ import asyncio
 from array import array
 from dataclasses import dataclass, field, replace
 
+import pytest
+
 from phono_console.config import AudioConfig, SendspinConfig
 from phono_console.controller import Status
 from phono_console.audio_engine_protocol import AudioSource, FrameFlags, TimestampedPcm
@@ -54,6 +56,11 @@ class FakeCapture:
 
     async def stop(self) -> None:
         self.stopped = True
+
+
+class HangingCapture(FakeCapture):
+    async def feed(self, pcm: bytes, capture_timestamp_us: int | None = None) -> None:
+        await asyncio.Event().wait()
 
 
 @dataclass
@@ -260,6 +267,21 @@ def test_server_commands_start_and_stop_the_capture_stream() -> None:
         assert "sendspin_source_connected" in names
         assert "sendspin_source_stream_started" in names
         assert "sendspin_source_stream_stopped" in names
+
+    asyncio.run(scenario())
+
+
+def test_stalled_sendspin_write_times_out(monkeypatch) -> None:
+    async def scenario() -> None:
+        import phono_console.sendspin_source as source_module
+
+        monkeypatch.setattr(source_module, "SOURCE_FEED_TIMEOUT_SECONDS", 0.01)
+        publisher, _, _ = make_publisher(FakeClient())
+
+        with pytest.raises(TimeoutError, match="Sendspin audio write stalled"):
+            await publisher._feed(HangingCapture(), b"pcm", 123)
+
+        assert publisher.stream_healthy is False
 
     asyncio.run(scenario())
 

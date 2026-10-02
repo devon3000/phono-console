@@ -647,6 +647,7 @@ def test_distributed_bluetooth_survives_transient_ma_unavailability() -> None:
             bluetooth_monitor=bluetooth,
             distribution_available=lambda: ready,
             distribution_capable=lambda _source: True,
+            distribution_stream_healthy=lambda: True,
             prepare_distribution=prepare,
             release_distribution=release,
         )
@@ -720,6 +721,47 @@ def test_distributed_bluetooth_releases_when_distribution_is_disabled() -> None:
         # becomes deliberately incapable even though Bluetooth remains live.
         ready = False
         capable = False
+        await subject.tick(now=2)
+
+        assert subject.route is Route.LOCAL_BLUETOOTH
+        assert router.routes[-1] is Route.LOCAL_BLUETOOTH
+        assert released == [True]
+
+    asyncio.run(scenario())
+
+
+def test_distributed_bluetooth_falls_back_when_source_stream_stalls() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor()
+        bluetooth = SimulatedLevelMonitor()
+        bluetooth.level = -20.0
+        router = SimulatedAudioRouter()
+        ready = True
+        stream_healthy = True
+        released = []
+
+        async def release():
+            released.append(True)
+
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            router,
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            distribution_available=lambda: ready,
+            distribution_capable=lambda _source: stream_healthy,
+            distribution_stream_healthy=lambda: stream_healthy,
+            prepare_distribution=lambda _source: asyncio.sleep(0, result=True),
+            release_distribution=release,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=1)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+
+        ready = False
+        stream_healthy = False
         await subject.tick(now=2)
 
         assert subject.route is Route.LOCAL_BLUETOOTH

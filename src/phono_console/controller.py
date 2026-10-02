@@ -51,6 +51,9 @@ class Controller:
         distribution_capable: Callable[
             [Source], bool | Awaitable[bool]
         ] | None = None,
+        distribution_stream_healthy: Callable[
+            [], bool | Awaitable[bool]
+        ] | None = None,
         prepare_distribution: Callable[[Source], Awaitable[bool]] | None = None,
         release_distribution: Callable[[], Awaitable[None]] | None = None,
         phono_output_mode: Callable[[], PhonoOutputMode] | None = None,
@@ -70,6 +73,7 @@ class Controller:
         self.bluetooth_is_playing = bluetooth_is_playing
         self.distribution_available = distribution_available
         self.distribution_capable = distribution_capable
+        self.distribution_stream_healthy = distribution_stream_healthy
         self.prepare_distribution = prepare_distribution
         self.release_distribution = release_distribution
         self.phono_output_mode = phono_output_mode or (lambda: PhonoOutputMode.LOCAL)
@@ -118,6 +122,12 @@ class Controller:
         if self.distribution_capable is None:
             return False
         result = self.distribution_capable(source)
+        return await result if hasattr(result, "__await__") else bool(result)
+
+    async def _distribution_stream_is_healthy(self) -> bool:
+        if self.distribution_stream_healthy is None:
+            return False
+        result = self.distribution_stream_healthy()
         return await result if hasattr(result, "__await__") else bool(result)
 
     async def tick(self, now: float | None = None) -> Status:
@@ -324,6 +334,7 @@ class Controller:
         )
         distribution_pending = False
         capable = await self._distribution_is_capable(selected_source)
+        stream_healthy = await self._distribution_stream_is_healthy()
         if selected_source is not Source.NONE and not available and capable:
             should_prepare = self._distribution_pending_source is not selected_source
             if (
@@ -412,6 +423,7 @@ class Controller:
             # incapable and must be allowed to move Bluetooth back to the
             # direct console path.
             and capable
+            and stream_healthy
         ):
             desired_route = Route.DISTRIBUTED_BLUETOOTH
         elif (
