@@ -107,6 +107,16 @@ def ma_loopback_command(config: Config) -> tuple[str, ...]:
     )
 
 
+def distribution_needs_start(
+    *, stream_requested: bool, console_playing: bool
+) -> bool:
+    """Return whether MA must be told to (re)start the distribution target."""
+    # stream_requested describes the source capture command, not the state of
+    # the target player/group.  It can remain true after MA has dissolved the
+    # group, so it is insufficient on its own to suppress a new play request.
+    return not stream_requested or not console_playing
+
+
 async def run_daemon(config: Config) -> None:
     state = StateStore()
     local_only_marker = Path(config.sendspin.state_dir) / "local-playback-only"
@@ -363,7 +373,12 @@ async def run_daemon(config: Config) -> None:
         if source is Source.PHONO and publisher.phono_stop_pending:
             return False
         await publisher.select_source(source)
-        if not state.sendspin_source.get("stream_requested"):
+        if distribution_needs_start(
+            stream_requested=bool(
+                state.sendspin_source.get("stream_requested")
+            ),
+            console_playing=music_assistant.console_playing,
+        ):
             started = await music_assistant.play_vinyl_source(
                 publisher.client_id, (config.routing.distribution_target,)
             )
