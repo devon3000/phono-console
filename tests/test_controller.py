@@ -646,6 +646,7 @@ def test_distributed_bluetooth_survives_transient_ma_unavailability() -> None:
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
             distribution_available=lambda: ready,
+            distribution_capable=lambda _source: True,
             prepare_distribution=prepare,
             release_distribution=release,
         )
@@ -678,6 +679,51 @@ def test_distributed_bluetooth_survives_transient_ma_unavailability() -> None:
         await subject.tick(now=4)
         await subject.tick(now=10)
         assert subject.route is Route.IDLE
+        assert released == [True]
+
+    asyncio.run(scenario())
+
+
+def test_distributed_bluetooth_releases_when_distribution_is_disabled() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor()
+        bluetooth = SimulatedLevelMonitor()
+        bluetooth.level = -20.0
+        router = SimulatedAudioRouter()
+        ready = True
+        capable = True
+        released = []
+
+        async def prepare(_source):
+            return True
+
+        async def release():
+            released.append(True)
+
+        subject = Controller(
+            config(),
+            phono,
+            SimulatedMusicAssistant(),
+            router,
+            SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            distribution_available=lambda: ready,
+            distribution_capable=lambda _source: capable,
+            prepare_distribution=prepare,
+            release_distribution=release,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=1)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+
+        # This models the user selecting Console/Local Only.  Distribution
+        # becomes deliberately incapable even though Bluetooth remains live.
+        ready = False
+        capable = False
+        await subject.tick(now=2)
+
+        assert subject.route is Route.LOCAL_BLUETOOTH
+        assert router.routes[-1] is Route.LOCAL_BLUETOOTH
         assert released == [True]
 
     asyncio.run(scenario())
