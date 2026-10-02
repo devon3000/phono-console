@@ -407,6 +407,11 @@ class Controller:
             self.route is Route.DISTRIBUTED_BLUETOOTH
             and bluetooth_active
             and not phono_active
+            # Preserve the return loop only through a transient MA telemetry
+            # gap.  An explicit switch to Local Only makes distribution
+            # incapable and must be allowed to move Bluetooth back to the
+            # direct console path.
+            and capable
         ):
             desired_route = Route.DISTRIBUTED_BLUETOOTH
         elif (
