@@ -32,5 +32,6 @@ def test_dashboard_exposes_one_authoritative_output_selector() -> None:
     assert 'id="local-only"' not in html
     assert "OUTPUT DESTINATION" in html
     assert "async function setOutputMode(mode)" in javascript
-    assert 'api("/v1/local-only"' in javascript
-    assert 'api("/v1/phono-output"' in javascript
+    assert 'api("/v1/output-mode"' in javascript
+    assert 'api("/v1/local-only"' not in javascript
+    assert 'api("/v1/phono-output"' not in javascript
