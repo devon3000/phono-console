@@ -331,6 +331,7 @@ async def run_daemon(config: Config) -> None:
                 and publisher is not None
                 and state.sendspin_source.get("connected")
                 and state.sendspin_source.get("stream_requested")
+                and publisher.stream_healthy
                 and state.music_assistant.get("connected")
                 and music_assistant.console_playing
             )
@@ -349,6 +350,10 @@ async def run_daemon(config: Config) -> None:
             and not state.local_playback_only
             and publisher.client_id is not None
             and state.sendspin_source.get("connected")
+            and (
+                not state.sendspin_source.get("stream_requested")
+                or publisher.stream_healthy
+            )
             and state.music_assistant.get("connected")
         )
 
@@ -421,6 +426,11 @@ async def run_daemon(config: Config) -> None:
         ),
         distribution_available=distribution_available,
         distribution_capable=distribution_capable,
+        distribution_stream_healthy=(
+            lambda: publisher.stream_healthy
+            if publisher is not None
+            else False
+        ),
         prepare_distribution=prepare_distribution,
         release_distribution=lambda: music_assistant.stop_players(
             (config.routing.distribution_target,)

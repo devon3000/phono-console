@@ -35,6 +35,7 @@ LOGGER = logging.getLogger(__name__)
 IDENTITY_FILE = "identity.key"
 PAIRING_FILE = "pairing.json"
 TIME_SYNC_TIMEOUT_SECONDS = 10.0
+SOURCE_FEED_TIMEOUT_SECONDS = 3.0
 SIGNAL_RELEASE_SECONDS = 1.0
 
 PcmStreamFactory = Callable[[], AsyncIterator[bytes | TimestampedPcm]]
@@ -263,6 +264,19 @@ class SendspinSourcePublisher:
         )
         self._stream_activity_level_dbfs = -120.0
         self._stream_activity_updated_at: float | None = None
+        self._last_feed_completed_at: float | None = None
+
+    @property
+    def stream_healthy(self) -> bool:
+        """Whether source PCM is actively reaching the Sendspin transport."""
+        if not self._connected or not self._streaming:
+            return False
+        completed = self._last_feed_completed_at
+        return bool(
+            completed is not None
+            and asyncio.get_running_loop().time() - completed
+            <= SOURCE_FEED_TIMEOUT_SECONDS
+        )
         self._stream_activity_seen_present = False
 
     @property
@@ -515,6 +529,7 @@ class SendspinSourcePublisher:
                 return
             self._stream_error = None
             self._streaming = True
+            self._last_feed_completed_at = None
             self._reset_stream_activity()
             self._stream_task = asyncio.create_task(
                 self._pump(capture), name="sendspin-source-stream"
@@ -568,7 +583,7 @@ class SendspinSourcePublisher:
                     pcm = limiter.process(chunk.pcm)
                     timestamp_us = chunk.first_sample_time_us + timeline_lead_us
                     frames = chunk.frames
-                    await capture.feed(pcm, capture_timestamp_us=timestamp_us)
+                    await self._feed(capture, pcm, timestamp_us)
                     captured_frames += frames
                     continue
                 await self._observe_stream_activity(chunk)
@@ -593,7 +608,7 @@ class SendspinSourcePublisher:
                     capture_anchor_us
                     + captured_frames * 1_000_000 // self.audio.sample_rate
                 )
-                await capture.feed(pcm, capture_timestamp_us=timestamp_us)
+                await self._feed(capture, pcm, timestamp_us)
                 captured_frames += frames
             error = "PCM capture ended unexpectedly"
         except asyncio.CancelledError:
@@ -620,6 +635,19 @@ class SendspinSourcePublisher:
                     await self._publish_state()
                 if error is not None and self._stream_requested:
                     self._schedule_stream_retry()
+
+    async def _feed(
+        self, capture: object, pcm: bytes, timestamp_us: int
+    ) -> None:
+        try:
+            async with asyncio.timeout(SOURCE_FEED_TIMEOUT_SECONDS):
+                await capture.feed(pcm, capture_timestamp_us=timestamp_us)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"Sendspin audio write stalled for "
+                f"{SOURCE_FEED_TIMEOUT_SECONDS:.1f}s"
+            ) from exc
+        self._last_feed_completed_at = asyncio.get_running_loop().time()
 
     def _reset_stream_activity(self) -> None:
         detector = self._stream_activity_detector
@@ -698,6 +726,7 @@ class SendspinSourcePublisher:
             self._stream_task = None
             was_streaming = self._streaming
             self._streaming = False
+            self._last_feed_completed_at = None
             self._stream_error = None
         if task is not None:
             task.cancel()
