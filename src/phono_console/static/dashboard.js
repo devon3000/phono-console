@@ -241,22 +241,9 @@ async function setPairing(enabled) {
 
 async function setOutputMode(mode) {
   try {
-    if (mode === "downstairs") {
-      await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled: false})});
-    }
-    await api("/v1/phono-output", {method: "PUT", body: JSON.stringify({mode})});
-    if (mode === "local") {
-      await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled: true})});
-    }
+    await api("/v1/output-mode", {method: "PUT", body: JSON.stringify({mode})});
     await poll();
   } catch (error) {
-    if (mode === "downstairs") {
-      try {
-        await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled: true})});
-      } catch (_) {
-        // Preserve the original routing error; local-only rollback is best effort.
-      }
-    }
     byId("control-result").textContent = error.message;
   }
 }

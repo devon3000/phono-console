@@ -225,6 +225,61 @@ def test_api_controls_sticky_phono_output_mode() -> None:
     asyncio.run(scenario())
 
 
+def test_api_atomically_controls_output_mode() -> None:
+    async def scenario() -> None:
+        calls = []
+
+        async def action(mode) -> None:
+            # State must already be authoritative while the hardware/network
+            # transition is running.
+            calls.append(
+                (mode.value, state.local_playback_only, state.phono_output_mode.value)
+            )
+
+        state = StateStore()
+        api = ControlApi(state, None, output_mode_action=action)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.put(
+                "/v1/output-mode", json={"mode": "downstairs"}
+            )
+            assert response.status == 200
+            assert calls[-1] == ("downstairs", False, "downstairs")
+
+            response = await client.put(
+                "/v1/output-mode", json={"mode": "local"}
+            )
+            assert response.status == 200
+            assert calls[-1] == ("local", True, "local")
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_api_rolls_back_atomic_output_mode_on_failure() -> None:
+    async def scenario() -> None:
+        async def action(_mode) -> None:
+            raise RuntimeError("handoff failed")
+
+        state = StateStore()
+        api = ControlApi(state, None, output_mode_action=action)
+        client = TestClient(TestServer(api.application()))
+        await client.start_server()
+        try:
+            response = await client.put(
+                "/v1/output-mode", json={"mode": "downstairs"}
+            )
+            assert response.status == 503
+            assert state.local_playback_only is False
+            assert state.phono_output_mode.value == "local"
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
 def test_api_rolls_back_phono_mode_when_handoff_fails() -> None:
     async def scenario() -> None:
         async def action(_mode) -> None:

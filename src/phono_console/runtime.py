@@ -584,6 +584,41 @@ async def run_daemon(config: Config) -> None:
                         "phono_output_remote_stop_unconfirmed", {"error": str(exc)}
                     )
 
+    async def output_mode_action(mode: PhonoOutputMode) -> None:
+        """Apply one authoritative output choice to every live source."""
+        local = mode is PhonoOutputMode.LOCAL
+        await local_only_action(local)
+        await phono_output_action(mode)
+
+        if local:
+            return
+        if publisher is None or publisher.client_id is None:
+            raise WholeHouseError("Sendspin source is not connected")
+
+        status = state.status
+        if status is None:
+            return
+        source = (
+            Source.PHONO
+            if status.phono_active
+            else Source.BLUETOOTH if status.bluetooth_active else Source.NONE
+        )
+        if source is Source.NONE:
+            return
+
+        # phono_output_action already starts an active record. Bluetooth used
+        # to be left for a later controller tick, which made the button appear
+        # to do nothing and allowed stale MA telemetry to win the race.
+        if source is Source.BLUETOOTH:
+            await publisher.select_source(source)
+            started = await music_assistant.play_vinyl_source(
+                publisher.client_id, (config.routing.distribution_target,)
+            )
+            if not started:
+                raise WholeHouseError(
+                    f"{config.routing.distribution_target} was not found in Music Assistant"
+                )
+
     async def hardware_volume_action(delta: int) -> None:
         status = state.status
         route = status.route if status is not None else Route.IDLE
@@ -706,6 +741,7 @@ async def run_daemon(config: Config) -> None:
         ),
         local_only_action=local_only_action,
         phono_output_action=phono_output_action,
+        output_mode_action=output_mode_action,
     )
     # Dashboard polling happens four times per second and otherwise buries the
     # routing/audio events that matter in the appliance journal.

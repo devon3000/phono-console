@@ -18,6 +18,7 @@ BluetoothMediaAction = Callable[[str], Awaitable[None]]
 AmplifierVolumeAction = Callable[[int, str], Awaitable[tuple[int, bool]]]
 LocalOnlyAction = Callable[[bool], Awaitable[None]]
 PhonoOutputAction = Callable[[PhonoOutputMode], Awaitable[None]]
+OutputModeAction = Callable[[PhonoOutputMode], Awaitable[None]]
 PUBLIC_PATHS = frozenset(("/", "/assets/dashboard.css", "/assets/dashboard.js"))
 
 
@@ -41,6 +42,7 @@ class ControlApi:
         amplifier_volume_action: AmplifierVolumeAction | None = None,
         local_only_action: LocalOnlyAction | None = None,
         phono_output_action: PhonoOutputAction | None = None,
+        output_mode_action: OutputModeAction | None = None,
     ) -> None:
         self.state = state
         self.token = token
@@ -54,7 +56,9 @@ class ControlApi:
         self.amplifier_volume_action = amplifier_volume_action
         self.local_only_action = local_only_action
         self.phono_output_action = phono_output_action
+        self.output_mode_action = output_mode_action
         self._whole_house_lock = asyncio.Lock()
+        self._output_mode_lock = asyncio.Lock()
 
     @web.middleware
     async def authenticate(self, request: web.Request, handler):
@@ -211,6 +215,56 @@ class ControlApi:
         )
         return web.json_response({"mode": mode.value})
 
+    async def set_output_mode(self, request: web.Request) -> web.Response:
+        """Atomically select the console or Downstairs output path.
+
+        This is deliberately one operation for both phono and Bluetooth.  The
+        older dashboard issued separate local-only and phono-mode requests,
+        allowing the controller to observe (and act on) an intermediate,
+        contradictory state.
+        """
+        body = await request.json()
+        try:
+            mode = PhonoOutputMode(body.get("mode"))
+        except (TypeError, ValueError) as exc:
+            raise web.HTTPBadRequest(
+                text="mode must be local or downstairs"
+            ) from exc
+
+        async with self._output_mode_lock:
+            previous_local_only = self.state.local_playback_only
+            previous_phono_mode = self.state.phono_output_mode
+            local_only = mode is PhonoOutputMode.LOCAL
+
+            # Publish the authoritative state first.  The controller runs in
+            # parallel with HTTP handlers and must never be able to restart a
+            # distributed route while a Console request is being applied.
+            await self.state.set_local_playback_only(local_only)
+            await self.state.set_phono_output_mode(mode)
+            try:
+                if self.output_mode_action is not None:
+                    await self.output_mode_action(mode)
+            except WholeHouseError as exc:
+                await self.state.set_local_playback_only(previous_local_only)
+                await self.state.set_phono_output_mode(previous_phono_mode)
+                raise web.HTTPConflict(text=str(exc)) from exc
+            except Exception as exc:
+                await self.state.set_local_playback_only(previous_local_only)
+                await self.state.set_phono_output_mode(previous_phono_mode)
+                raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+
+            await self.state.emit(
+                "output_mode_changed",
+                {
+                    "mode": mode.value,
+                    "local_playback_only": local_only,
+                    "source": "api",
+                },
+            )
+            return web.json_response(
+                {"mode": mode.value, "local_playback_only": local_only}
+            )
+
     async def set_whole_house(self, request: web.Request) -> web.Response:
         body = await request.json()
         requested = body.get("enabled")
@@ -287,6 +341,7 @@ class ControlApi:
                 web.put("/v1/amplifier/volume", self.amplifier_volume),
                 web.put("/v1/local-only", self.set_local_only),
                 web.put("/v1/phono-output", self.set_phono_output),
+                web.put("/v1/output-mode", self.set_output_mode),
                 web.put("/v1/whole-house", self.set_whole_house),
             ]
         )
