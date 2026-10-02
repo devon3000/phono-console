@@ -212,14 +212,13 @@ function render(data) {
   const phonoMode = data.phono_output_mode || "local";
   const activeRoute = data.status?.route || "idle";
   const stickyMinutes = Number(data.system?.phono_mode_sticky_minutes || 60);
-  byId("phono-local").className = phonoMode === "local" ? "primary-button" : "secondary-button";
-  byId("phono-downstairs").className = phonoMode === "downstairs" ? "primary-button" : "secondary-button";
-  byId("local-only").classList.toggle("active", localOnly);
-  byId("local-only").textContent = localOnly ? "LOCAL ONLY: ON" : "LOCAL ONLY";
+  const outputMode = localOnly ? "local" : phonoMode;
+  byId("phono-local").className = outputMode === "local" ? "primary-button" : "secondary-button";
+  byId("phono-downstairs").className = outputMode === "downstairs" ? "primary-button" : "secondary-button";
   byId("pairing-open").disabled = pairing;
   byId("pairing-close").disabled = !pairing;
-  byId("control-result").textContent = localOnly
-    ? "Local-only mode is on. Phono and Bluetooth bypass Music Assistant."
+  byId("control-result").textContent = outputMode === "local"
+    ? "Phono and Bluetooth play directly on the console."
     : pairing
     ? "Bluetooth pairing is open temporarily. Select PhonoConsole on your phone."
     : phonoMode === "downstairs" && activeRoute === "distributed_phono"
@@ -240,21 +239,24 @@ async function setPairing(enabled) {
   }
 }
 
-async function setLocalOnly() {
-  const enabled = !byId("local-only").classList.contains("active");
+async function setOutputMode(mode) {
   try {
-    await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled})});
-    await poll();
-  } catch (error) {
-    byId("control-result").textContent = error.message;
-  }
-}
-
-async function setPhonoOutput(mode) {
-  try {
+    if (mode === "downstairs") {
+      await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled: false})});
+    }
     await api("/v1/phono-output", {method: "PUT", body: JSON.stringify({mode})});
+    if (mode === "local") {
+      await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled: true})});
+    }
     await poll();
   } catch (error) {
+    if (mode === "downstairs") {
+      try {
+        await api("/v1/local-only", {method: "PUT", body: JSON.stringify({enabled: true})});
+      } catch (_) {
+        // Preserve the original routing error; local-only rollback is best effort.
+      }
+    }
     byId("control-result").textContent = error.message;
   }
 }
@@ -292,9 +294,8 @@ byId("reset-levels").addEventListener("click", async () => {
 });
 byId("pairing-open").addEventListener("click", () => setPairing(true));
 byId("pairing-close").addEventListener("click", () => setPairing(false));
-byId("local-only").addEventListener("click", setLocalOnly);
-byId("phono-local").addEventListener("click", () => setPhonoOutput("local"));
-byId("phono-downstairs").addEventListener("click", () => setPhonoOutput("downstairs"));
+byId("phono-local").addEventListener("click", () => setOutputMode("local"));
+byId("phono-downstairs").addEventListener("click", () => setOutputMode("downstairs"));
 byId("bluetooth-previous").addEventListener("click", () => bluetoothMedia("previous"));
 byId("bluetooth-play-pause").addEventListener("click", (event) => bluetoothMedia(event.currentTarget.dataset.command || "play"));
 byId("bluetooth-next").addEventListener("click", () => bluetoothMedia("next"));

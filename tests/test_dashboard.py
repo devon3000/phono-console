@@ -23,3 +23,14 @@ def test_dashboard_documents_output_meter_limit() -> None:
     javascript = (STATIC / "dashboard.js").read_text()
     assert "unity gain" in javascript
     assert "does not expose live PCM levels" in javascript
+
+
+def test_dashboard_exposes_one_authoritative_output_selector() -> None:
+    html = (STATIC / "dashboard.html").read_text()
+    javascript = (STATIC / "dashboard.js").read_text()
+
+    assert 'id="local-only"' not in html
+    assert "OUTPUT DESTINATION" in html
+    assert "async function setOutputMode(mode)" in javascript
+    assert 'api("/v1/local-only"' in javascript
+    assert 'api("/v1/phono-output"' in javascript
