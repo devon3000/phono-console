@@ -284,6 +284,17 @@ class MusicAssistantState:
                     self._play_requests.pop(key, None)
             raise
 
+    async def invalidate_play_requests(self) -> None:
+        """Invalidate cached/in-flight starts before an output stop or handoff."""
+        async with self._play_request_lock:
+            tasks = [entry[2] for entry in self._play_requests.values()]
+            self._play_requests.clear()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _play_vinyl_source_once(
         self,
         request_id: int,
@@ -346,6 +357,7 @@ class MusicAssistantState:
 
     async def stop_players(self, players: Sequence[str]) -> list[str]:
         """Stop playback on the named players/groups."""
+        await self.invalidate_play_requests()
         await self._ensure_connected()
         assert self._client is not None
         stopped: list[str] = []
@@ -357,6 +369,17 @@ class MusicAssistantState:
             await self._client.player_queues.stop(player.player_id)
             stopped.append(player.player_id)
         return stopped
+
+    def player_is_playing(self, player_name: str) -> bool:
+        """Return the latest in-memory state for a named player or group."""
+        if self._client is None:
+            return False
+        player = self._find_named_player(player_name)
+        return bool(
+            player is not None
+            and player.available
+            and player.playback_state is PlaybackState.PLAYING
+        )
 
     async def set_group_volume(self, player_name: str, volume: int) -> bool:
         """Set a named MA player/group to an absolute logical volume."""

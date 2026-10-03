@@ -3,7 +3,7 @@ import struct
 
 from phono_console.controller import Status
 from phono_console.levels import LevelSession, analyze_s16le_stereo
-from phono_console.policy import Route
+from phono_console.policy import OutputTarget, Route, RoutingPhase, Source
 from phono_console.state import StateStore
 
 
@@ -53,5 +53,33 @@ def test_health_reports_component_failure_and_stale_controller() -> None:
         health = store.health_snapshot()
         assert health["operational"] is False
         assert health["failed_components"] == ["capture"]
+
+    asyncio.run(scenario())
+
+
+def test_output_compatibility_fields_are_derived_from_one_intent() -> None:
+    async def scenario() -> None:
+        store = StateStore()
+        generation = await store.set_output_target(OutputTarget.DOWNSTAIRS)
+        await store.set_routing_state(
+            RoutingPhase.STARTING_DISTRIBUTION,
+            session_generation=generation,
+            session_source=Source.BLUETOOTH,
+        )
+        snapshot = store.snapshot()
+
+        assert snapshot["whole_house_requested"] is True
+        assert snapshot["local_playback_only"] is False
+        assert snapshot["phono_output_mode"] == "downstairs"
+        assert snapshot["routing"] == {
+            "requested_output": "downstairs",
+            "actual_route": None,
+            "phase": "starting_distribution",
+            "generation": 1,
+            "session_generation": 1,
+            "session_source": "bluetooth",
+            "confirmed": False,
+            "error": None,
+        }
 
     asyncio.run(scenario())

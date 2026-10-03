@@ -3,6 +3,7 @@ import asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
 from phono_console.api import ControlApi
+from phono_console.policy import OutputTarget, PhonoOutputMode
 from phono_console.state import StateStore
 
 
@@ -272,10 +273,52 @@ def test_api_rolls_back_atomic_output_mode_on_failure() -> None:
                 "/v1/output-mode", json={"mode": "downstairs"}
             )
             assert response.status == 503
-            assert state.local_playback_only is False
+            # The canonical rollback cannot recreate the old contradictory
+            # state (Local phono mode while Local Only was false).
+            assert state.local_playback_only is True
             assert state.phono_output_mode.value == "local"
         finally:
             await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_rapid_output_switches_supersede_stale_transitions() -> None:
+    async def scenario() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls: list[str] = []
+
+        async def action(mode) -> None:
+            calls.append(mode.value)
+            if len(calls) == 1:
+                entered.set()
+                await release.wait()
+
+        state = StateStore()
+        api = ControlApi(state, None, output_mode_action=action)
+        first = asyncio.create_task(
+            api._set_canonical_output(
+                PhonoOutputMode.DOWNSTAIRS, source="test"
+            )
+        )
+        await entered.wait()
+        second = asyncio.create_task(
+            api._set_canonical_output(PhonoOutputMode.LOCAL, source="test")
+        )
+        await asyncio.sleep(0)
+        third = asyncio.create_task(
+            api._set_canonical_output(
+                PhonoOutputMode.DOWNSTAIRS, source="test"
+            )
+        )
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.gather(first, second, third)
+
+        assert state.output_target is OutputTarget.DOWNSTAIRS
+        assert state.routing_generation == 3
+        assert calls == ["downstairs", "downstairs"]
 
     asyncio.run(scenario())
 

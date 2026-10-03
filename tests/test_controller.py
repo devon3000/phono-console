@@ -465,7 +465,7 @@ def test_phono_inherits_distributed_bluetooth_output_path() -> None:
     async def scenario() -> None:
         phono = SimulatedLevelMonitor(level=-120.0)
         bluetooth = SimulatedLevelMonitor(level=-20.0)
-        output_mode = PhonoOutputMode.LOCAL
+        output_mode = PhonoOutputMode.DOWNSTAIRS
         inherited = 0
         prepared = []
 
@@ -604,6 +604,7 @@ def test_distributed_bluetooth_releases_after_detector_hold() -> None:
             distribution_available=lambda: True,
             prepare_distribution=prepare,
             release_distribution=release,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=10)
@@ -650,6 +651,7 @@ def test_distributed_bluetooth_survives_transient_ma_unavailability() -> None:
             distribution_stream_healthy=lambda: True,
             prepare_distribution=prepare,
             release_distribution=release,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=1)
@@ -712,6 +714,7 @@ def test_distributed_bluetooth_releases_when_distribution_is_disabled() -> None:
             distribution_capable=lambda _source: capable,
             prepare_distribution=prepare,
             release_distribution=release,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=1)
@@ -755,6 +758,7 @@ def test_distributed_bluetooth_falls_back_when_source_stream_stalls() -> None:
             distribution_stream_healthy=lambda: stream_healthy,
             prepare_distribution=lambda _source: asyncio.sleep(0, result=True),
             release_distribution=release,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=1)
@@ -795,10 +799,11 @@ def test_timestamped_distribution_waits_silently_then_switches_to_ma() -> None:
             distribution_available=lambda: ready,
             distribution_capable=lambda source: source.value == "bluetooth",
             prepare_distribution=prepare,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=0.25)
-        assert subject.route is Route.IDLE
+        assert subject.route is Route.LOCAL_BLUETOOTH
         assert prepared == ["bluetooth"]
         await subject.tick(now=1)
         assert prepared == ["bluetooth"]
@@ -826,10 +831,11 @@ def test_timestamped_distribution_falls_back_locally_after_timeout() -> None:
             distribution_available=lambda: False,
             distribution_capable=lambda _source: True,
             prepare_distribution=lambda _source: asyncio.sleep(0, result=False),
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
         await subject.tick(now=0)
         await subject.tick(now=0.25)
-        assert subject.route is Route.IDLE
+        assert subject.route is Route.LOCAL_BLUETOOTH
         await subject.tick(now=5.3)
         assert subject.route is Route.LOCAL_BLUETOOTH
 

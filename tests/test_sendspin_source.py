@@ -218,7 +218,12 @@ def test_publisher_applies_source_specific_gain() -> None:
     asyncio.run(scenario())
 
 
-def make_publisher(client: FakeClient, state: StateStore | None = None):
+def make_publisher(
+    client: FakeClient,
+    state: StateStore | None = None,
+    *,
+    source_devices: dict[Source, str] | None = None,
+):
     events = SimulatedEventSink()
     state = state or StateStore()
 
@@ -235,6 +240,7 @@ def make_publisher(client: FakeClient, state: StateStore | None = None):
         reconnect_seconds=0.01,
         signal_poll_seconds=0.01,
         signal_release_seconds=0.03,
+        source_devices=source_devices,
     )
     publisher.client_id = "source-client-id"
     return publisher, events, state
@@ -353,7 +359,7 @@ def test_rapid_stop_start_commands_do_not_overlap_capture_cleanup() -> None:
     asyncio.run(scenario())
 
 
-def test_bluetooth_source_commands_control_phone_and_latch_pause() -> None:
+def test_internal_bluetooth_source_stop_does_not_pause_phone() -> None:
     async def scenario() -> None:
         media = FakeBluetoothMedia()
         publisher = SendspinSourcePublisher(
@@ -367,11 +373,11 @@ def test_bluetooth_source_commands_control_phone_and_latch_pause() -> None:
         publisher._selected_source = Source.BLUETOOTH
 
         await publisher._handle_server_command("stop")
-        assert media.commands == ["pause"]
-        assert publisher._bluetooth_pause_latched is True
+        assert media.commands == []
+        assert publisher._bluetooth_pause_latched is False
 
         await publisher._handle_server_command("start")
-        assert media.commands == ["pause", "play"]
+        assert media.commands == ["play"]
         assert publisher._bluetooth_pause_latched is False
 
     asyncio.run(scenario())
@@ -408,6 +414,33 @@ def test_signal_watcher_never_changes_controller_selected_source() -> None:
         assert not any(
             event == "sendspin_source_selected" for event, _ in events.events
         )
+
+    asyncio.run(scenario())
+
+
+def test_unselected_source_cannot_assert_line_sense() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        state = StateStore()
+        publisher, _, _ = make_publisher(
+            client,
+            state,
+            source_devices={
+                Source.PHONO: "phono_capture",
+                Source.BLUETOOTH: "bluealsa",
+            },
+        )
+        publisher._selected_source = Source.BLUETOOTH
+        await state.set_status(
+            Status(Route.LOCAL_PHONO, True, False, False, -20.0)
+        )
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.05)
+        stop.set()
+        await run
+
+        assert [signal.value for signal in client.signals] == ["absent"]
 
     asyncio.run(scenario())
 
@@ -507,6 +540,7 @@ def test_bluetooth_activity_is_reported_as_line_sense_signal() -> None:
         client = FakeClient()
         state = StateStore()
         publisher, _, _ = make_publisher(client, state)
+        publisher._selected_source = Source.BLUETOOTH
         stop = asyncio.Event()
         run = asyncio.create_task(publisher.run(stop))
         await asyncio.sleep(0.03)
@@ -535,6 +569,7 @@ def test_brief_bluetooth_gap_does_not_clear_line_sense() -> None:
         client = FakeClient()
         state = StateStore()
         publisher, _, _ = make_publisher(client, state)
+        publisher._selected_source = Source.BLUETOOTH
         publisher.signal_release_seconds = 0.2
         stop = asyncio.Event()
         run = asyncio.create_task(publisher.run(stop))
@@ -705,9 +740,10 @@ def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
         await asyncio.sleep(0.03)
 
         client.command("start")
-        await asyncio.sleep(0.05)
-        assert publisher._stream_task is None
-        assert state.sendspin_source["streaming"] is False
+        deadline = asyncio.get_running_loop().time() + 0.5
+        while len(client.captures) < 2:
+            assert asyncio.get_running_loop().time() < deadline
+            await asyncio.sleep(0.01)
         assert len(client.captures) >= 2
         assert state.sendspin_source["stream_requested"] is True
         assert [name for name, _ in events.events].count(
@@ -716,6 +752,8 @@ def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
 
         stop.set()
         await asyncio.wait_for(run, timeout=2)
+        assert publisher._stream_task is None
+        assert state.sendspin_source["streaming"] is False
 
     asyncio.run(scenario())
 

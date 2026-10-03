@@ -12,10 +12,14 @@ from .interfaces import AudioRouter, EventSink, LevelMonitor, MusicAssistant, St
 from .policy import (
     DistributionPath,
     Inputs,
+    OutputTarget,
     Route,
     Source,
     PhonoOutputMode,
+    RoutingPhase,
+    RoutingObservation,
     choose_route,
+    reduce_routing,
     route_distribution,
     route_source,
 )
@@ -329,13 +333,18 @@ class Controller:
             )
         )
         distribution_required = bool(
-            selected_source is Source.PHONO
+            selected_source in {Source.PHONO, Source.BLUETOOTH}
             and output_mode is PhonoOutputMode.DOWNSTAIRS
         )
         distribution_pending = False
         capable = await self._distribution_is_capable(selected_source)
         stream_healthy = await self._distribution_stream_is_healthy()
-        if selected_source is not Source.NONE and not available and capable:
+        if (
+            distribution_required
+            and selected_source is not Source.NONE
+            and not available
+            and capable
+        ):
             should_prepare = self._distribution_pending_source is not selected_source
             if (
                 distribution_required
@@ -349,6 +358,10 @@ class Controller:
             if should_prepare:
                 self._distribution_pending_source = selected_source
                 self._distribution_pending_since = timestamp
+                await self._set_routing_state(
+                    RoutingPhase.STARTING_DISTRIBUTION,
+                    session_source=selected_source,
+                )
                 try:
                     if self.prepare_distribution is not None:
                         await self.prepare_distribution(selected_source)
@@ -367,43 +380,58 @@ class Controller:
                     elapsed_ms < self.config.routing.distribution_start_timeout_ms
                 )
         elif distribution_required and not available:
-            # Downstairs is an explicit user choice. Silence is safer than
-            # resuming the direct path while an unconfirmed remote stream may
-            # already be audible with network delay.
+            # Downstairs is requested but not confirmed. Keep the physical
+            # source audible locally and report the failed transition.
             distribution_pending = True
             await self._set_component(
                 "distribution",
                 "degraded",
-                "Downstairs unavailable; direct phono output is muted",
+                "Downstairs unavailable; source remains local",
+            )
+            await self._set_routing_state(
+                RoutingPhase.DEGRADED,
+                session_source=selected_source,
+                error="Downstairs unavailable; source remains local",
             )
         elif available or selected_source is Source.NONE:
             self._distribution_pending_source = None
             self._distribution_pending_since = None
 
-        inputs = Inputs(
-            selected_source is Source.PHONO,
-            selected_source is Source.BLUETOOTH,
-            ma_playing,
-            available,
-            output_mode,
+        routing_generation = int(
+            getattr(self.status_sink, "routing_generation", 0)
+        )
+        routing_decision = reduce_routing(
+            OutputTarget.DOWNSTAIRS
+            if output_mode is PhonoOutputMode.DOWNSTAIRS
+            else OutputTarget.CONSOLE,
+            RoutingObservation(
+                active_source=selected_source,
+                ma_console_playing=(available if selected_source is not Source.NONE else ma_playing),
+                ma_target_playing=available,
+                ma_connected=available,
+                sendspin_connected=available,
+                sendspin_stream_requested=available,
+                sendspin_streaming=available,
+                sendspin_stream_healthy=available,
+                distribution_capable=capable,
+                selected_source=selected_source,
+                session_generation=routing_generation if available else None,
+            ),
+            generation=routing_generation,
+            distribution_session_active=self.route in {
+                Route.DISTRIBUTED_PHONO,
+                Route.DISTRIBUTED_BLUETOOTH,
+            },
         )
         # Keep direct phono playback alive while MA starts and buffers its
         # return feed. Once distribution becomes available, the router swaps
         # the exclusive physical output from direct capture to MA playback.
-        # Bluetooth retains its existing fail-silent startup behavior.
-        desired_route = (
-            Route.LOCAL_PHONO
-            if distribution_pending and selected_source is Source.PHONO
-            else (Route.IDLE if distribution_pending else choose_route(inputs))
-        )
-        # Once Music Assistant has requested a source stream, its source.stop
-        # command is the authority for ending that distributed session.  The
-        # local level detector can briefly read silence while ALSA consumers
-        # start or buffers settle; treating that gap as source-off creates a
-        # destructive loop (stop MA, fall back locally, request MA again).
-        # Keep the active distributed path latched, while still allowing the
-        # higher-priority phono input to preempt Bluetooth and Bluetooth to
-        # take over after phono has genuinely released.
+        # Both physical sources remain local until the synchronized return is
+        # positively confirmed.
+        desired_route = routing_decision.route
+        # Keep an already-confirmed path latched through a brief control-plane
+        # gap, while still allowing source priority and explicit output intent
+        # to change it.
         # A Sendspin stop/start handshake can make MA's player telemetry false
         # for a single tick even though the Bluetooth transport is still
         # playing and the distributed session is immediately returning.  Do
@@ -551,6 +579,14 @@ class Controller:
             )
             self.route = route
 
+        if route in {Route.DISTRIBUTED_PHONO, Route.DISTRIBUTED_BLUETOOTH}:
+            await self._set_routing_state(
+                RoutingPhase.STABLE,
+                session_source=route_source(route),
+            )
+        elif output_mode is PhonoOutputMode.LOCAL:
+            await self._set_routing_state(RoutingPhase.STABLE)
+
         status = Status(
             route,
             phono_active,
@@ -598,6 +634,25 @@ class Controller:
         setter = getattr(self.status_sink, "set_component", None)
         if setter is not None:
             await setter(name, status, message, **details)
+
+    async def _set_routing_state(
+        self,
+        phase: RoutingPhase,
+        *,
+        session_source: Source = Source.NONE,
+        error: str | None = None,
+    ) -> None:
+        setter = getattr(self.status_sink, "set_routing_state", None)
+        if setter is not None:
+            generation = getattr(self.status_sink, "routing_generation", None)
+            await setter(
+                phase,
+                session_generation=(
+                    generation if session_source is not Source.NONE else None
+                ),
+                session_source=session_source,
+                error=error,
+            )
 
     async def _set_component_from_monitor(
         self, name: str, fallback_status: str, fallback_message: str

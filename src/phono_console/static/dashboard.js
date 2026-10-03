@@ -208,11 +208,11 @@ function render(data) {
   for (const id of ["bluetooth-previous", "bluetooth-play-pause", "bluetooth-next"]) {
     byId(id).disabled = !mediaAvailable;
   }
-  const localOnly = Boolean(data.local_playback_only);
-  const phonoMode = data.phono_output_mode || "local";
-  const activeRoute = data.status?.route || "idle";
-  const stickyMinutes = Number(data.system?.phono_mode_sticky_minutes || 60);
-  const outputMode = localOnly ? "local" : phonoMode;
+  const routing = data.routing || {};
+  const activeRoute = routing.actual_route || data.status?.route || "idle";
+  const requestedOutput = routing.requested_output
+    || (data.local_playback_only ? "console" : "downstairs");
+  const outputMode = requestedOutput === "downstairs" ? "downstairs" : "local";
   byId("phono-local").className = outputMode === "local" ? "primary-button" : "secondary-button";
   byId("phono-downstairs").className = outputMode === "downstairs" ? "primary-button" : "secondary-button";
   byId("pairing-open").disabled = pairing;
@@ -221,12 +221,14 @@ function render(data) {
     ? "Phono and Bluetooth play directly on the console."
     : pairing
     ? "Bluetooth pairing is open temporarily. Select PhonoConsole on your phone."
-    : phonoMode === "downstairs" && activeRoute === "distributed_phono"
-    ? `Record is playing synchronized on Downstairs. After ${stickyMinutes} minutes without phono signal, Console becomes the default again.`
-    : phonoMode === "downstairs" && data.status?.phono_active
-    ? "Connecting Downstairs. Direct console playback continues until the synchronized return path is ready."
-    : phonoMode === "downstairs"
-    ? "Downstairs is selected for the next record; no phono signal is active."
+    : outputMode === "downstairs" && activeRoute.startsWith("distributed_")
+    ? "Music Assistant confirms synchronized Downstairs playback."
+    : outputMode === "downstairs" && routing.phase === "degraded"
+    ? `${routing.error || "Downstairs is unavailable."} The source remains on the console.`
+    : outputMode === "downstairs" && (data.status?.phono_active || data.status?.bluetooth_active)
+    ? "Connecting Downstairs. Console playback continues until the synchronized return path is confirmed."
+    : outputMode === "downstairs"
+    ? "Downstairs is selected for the next physical source."
     : "Records play directly on the console with minimum latency.";
 }
 
