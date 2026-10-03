@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from .controller import Status
 from .levels import LevelSession, StereoLevel
-from .policy import PhonoOutputMode
+from .policy import OutputTarget, PhonoOutputMode, RoutingPhase, Source
 
 
 @dataclass(frozen=True)
@@ -26,9 +26,12 @@ class StateStore:
         self._started_monotonic = time.monotonic()
         self._last_status_monotonic: float | None = None
         self.status: Status | None = None
-        self.whole_house_requested = False
-        self.local_playback_only = False
-        self.phono_output_mode = PhonoOutputMode.LOCAL
+        self.output_target = OutputTarget.CONSOLE
+        self.routing_generation = 0
+        self.routing_phase = RoutingPhase.STABLE
+        self.routing_session_generation: int | None = None
+        self.routing_session_source = Source.NONE
+        self.routing_error: str | None = None
         self.sendspin_source: dict[str, object] = {}
         self.music_assistant: dict[str, object] = {}
         self.bluetooth: dict[str, object] = {}
@@ -128,19 +131,68 @@ class StateStore:
             self.changed.notify_all()
 
     async def request_whole_house(self, requested: bool) -> None:
-        async with self.changed:
-            self.whole_house_requested = requested
-            self.changed.notify_all()
+        await self.set_output_target(
+            OutputTarget.DOWNSTAIRS if requested else OutputTarget.CONSOLE
+        )
 
     async def set_local_playback_only(self, enabled: bool) -> None:
-        async with self.changed:
-            self.local_playback_only = enabled
-            self.changed.notify_all()
+        await self.set_output_target(
+            OutputTarget.CONSOLE if enabled else OutputTarget.DOWNSTAIRS
+        )
 
     async def set_phono_output_mode(self, mode: PhonoOutputMode) -> None:
+        await self.set_output_target(
+            OutputTarget.DOWNSTAIRS
+            if mode is PhonoOutputMode.DOWNSTAIRS
+            else OutputTarget.CONSOLE
+        )
+
+    async def set_output_target(
+        self, target: OutputTarget, *, increment: bool = True
+    ) -> int:
         async with self.changed:
-            self.phono_output_mode = mode
+            self.output_target = target
+            if increment:
+                self.routing_generation += 1
+            self.routing_phase = (
+                RoutingPhase.STARTING_DISTRIBUTION
+                if target is OutputTarget.DOWNSTAIRS
+                else RoutingPhase.STOPPING_DISTRIBUTION
+            )
+            self.routing_error = None
             self.changed.notify_all()
+            return self.routing_generation
+
+    async def set_routing_state(
+        self,
+        phase: RoutingPhase,
+        *,
+        session_generation: int | None = None,
+        session_source: Source = Source.NONE,
+        error: str | None = None,
+    ) -> None:
+        async with self.changed:
+            self.routing_phase = phase
+            self.routing_session_generation = session_generation
+            self.routing_session_source = session_source
+            self.routing_error = error
+            self.changed.notify_all()
+
+    @property
+    def local_playback_only(self) -> bool:
+        return self.output_target is OutputTarget.CONSOLE
+
+    @property
+    def phono_output_mode(self) -> PhonoOutputMode:
+        return (
+            PhonoOutputMode.DOWNSTAIRS
+            if self.output_target is OutputTarget.DOWNSTAIRS
+            else PhonoOutputMode.LOCAL
+        )
+
+    @property
+    def whole_house_requested(self) -> bool:
+        return self.output_target is OutputTarget.DOWNSTAIRS
 
     async def emit(self, event: str, details: dict[str, object]) -> None:
         async with self.changed:
@@ -155,11 +207,27 @@ class StateStore:
             status = asdict(self.status)
             status["route"] = self.status.route.value
         health = self.health_snapshot()
+        actual_route = self.status.route.value if self.status is not None else None
+        confirmed = bool(
+            self.status is not None
+            and self.status.route.value.startswith("distributed_")
+            and self.routing_phase is RoutingPhase.STABLE
+        )
         return {
             "status": status,
             "whole_house_requested": self.whole_house_requested,
             "local_playback_only": self.local_playback_only,
             "phono_output_mode": self.phono_output_mode.value,
+            "routing": {
+                "requested_output": self.output_target.value,
+                "actual_route": actual_route,
+                "phase": self.routing_phase.value,
+                "generation": self.routing_generation,
+                "session_generation": self.routing_session_generation,
+                "session_source": self.routing_session_source.value,
+                "confirmed": confirmed,
+                "error": self.routing_error,
+            },
             "sendspin_source": dict(self.sendspin_source),
             "music_assistant": dict(self.music_assistant),
             "bluetooth": dict(self.bluetooth),

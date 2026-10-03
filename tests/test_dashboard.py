@@ -35,3 +35,6 @@ def test_dashboard_exposes_one_authoritative_output_selector() -> None:
     assert 'api("/v1/output-mode"' in javascript
     assert 'api("/v1/local-only"' not in javascript
     assert 'api("/v1/phono-output"' not in javascript
+    assert "routing.requested_output" in javascript
+    assert "routing.actual_route" in javascript
+    assert "routing.phase" in javascript

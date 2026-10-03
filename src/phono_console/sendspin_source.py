@@ -470,17 +470,14 @@ class SendspinSourcePublisher:
                     },
                 )
                 return
-            if self._selected_source is Source.BLUETOOTH and self._bluetooth_media:
-                if command == "start":
-                    self._bluetooth_pause_latched = False
-                    self._bluetooth_pause_observed = False
-                    transport_command = "play"
-                else:
-                    # Latch before sending Pause so still-buffered PCM cannot
-                    # immediately trigger line-sense auto-play again.
-                    self._bluetooth_pause_latched = True
-                    self._bluetooth_pause_observed = False
-                    transport_command = "pause"
+            if (
+                command == "start"
+                and self._selected_source is Source.BLUETOOTH
+                and self._bluetooth_media
+            ):
+                self._bluetooth_pause_latched = False
+                self._bluetooth_pause_observed = False
+                transport_command = "play"
                 try:
                     await self._bluetooth_media.media_command(transport_command)
                 except Exception as exc:
@@ -785,10 +782,14 @@ class SendspinSourcePublisher:
             # choose Bluetooth after the controller chose phono (or vice
             # versa), leaving the declared route and actual Sendspin capture
             # source inconsistent.  This watcher reports line sense only.
-            detected = (
-                bool(status.phono_active or status.bluetooth_active)
-                if status is not None
-                else False
+            detected = bool(
+                status is not None
+                and (
+                    self._selected_source is Source.PHONO
+                    and status.phono_active
+                    or self._selected_source is Source.BLUETOOTH
+                    and status.bluetooth_active
+                )
             )
             detector = self._stream_activity_detector
             if (

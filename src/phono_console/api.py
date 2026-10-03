@@ -8,7 +8,7 @@ from importlib.resources import files
 from aiohttp import web
 
 from .state import StateStore
-from .policy import PhonoOutputMode
+from .policy import OutputTarget, PhonoOutputMode
 
 WholeHouseAction = Callable[[bool], Awaitable[None]]
 LevelResetAction = Callable[[], None]
@@ -57,7 +57,6 @@ class ControlApi:
         self.local_only_action = local_only_action
         self.phono_output_action = phono_output_action
         self.output_mode_action = output_mode_action
-        self._whole_house_lock = asyncio.Lock()
         self._output_mode_lock = asyncio.Lock()
 
     @web.middleware
@@ -177,15 +176,8 @@ class ControlApi:
         enabled = body.get("enabled")
         if not isinstance(enabled, bool):
             raise web.HTTPBadRequest(text="enabled must be a boolean")
-        if self.local_only_action is not None:
-            try:
-                await self.local_only_action(enabled)
-            except Exception as exc:
-                raise web.HTTPServiceUnavailable(text=str(exc)) from exc
-        await self.state.set_local_playback_only(enabled)
-        await self.state.emit(
-            "local_playback_only_changed", {"enabled": enabled, "source": "api"}
-        )
+        mode = PhonoOutputMode.LOCAL if enabled else PhonoOutputMode.DOWNSTAIRS
+        await self._set_canonical_output(mode, source="api_local_only")
         return web.json_response({"enabled": enabled})
 
     async def set_phono_output(self, request: web.Request) -> web.Response:
@@ -196,23 +188,7 @@ class ControlApi:
             raise web.HTTPBadRequest(
                 text="mode must be local or downstairs"
             ) from exc
-        previous_mode = self.state.phono_output_mode
-        # Publish the requested mode before the remote handoff begins. The
-        # controller keeps direct phono playback active until MA confirms the
-        # buffered return feed, then swaps the console output to that feed.
-        await self.state.set_phono_output_mode(mode)
-        if self.phono_output_action is not None:
-            try:
-                await self.phono_output_action(mode)
-            except WholeHouseError as exc:
-                await self.state.set_phono_output_mode(previous_mode)
-                raise web.HTTPConflict(text=str(exc)) from exc
-            except Exception as exc:
-                await self.state.set_phono_output_mode(previous_mode)
-                raise web.HTTPServiceUnavailable(text=str(exc)) from exc
-        await self.state.emit(
-            "phono_output_mode_changed", {"mode": mode.value, "source": "api"}
-        )
+        await self._set_canonical_output(mode, source="api_phono_output")
         return web.json_response({"mode": mode.value})
 
     async def set_output_mode(self, request: web.Request) -> web.Response:
@@ -231,97 +207,88 @@ class ControlApi:
                 text="mode must be local or downstairs"
             ) from exc
 
-        async with self._output_mode_lock:
-            previous_local_only = self.state.local_playback_only
-            previous_phono_mode = self.state.phono_output_mode
-            local_only = mode is PhonoOutputMode.LOCAL
-
-            # Publish the authoritative state first.  The controller runs in
-            # parallel with HTTP handlers and must never be able to restart a
-            # distributed route while a Console request is being applied.
-            await self.state.set_local_playback_only(local_only)
-            await self.state.set_phono_output_mode(mode)
-            try:
-                if self.output_mode_action is not None:
-                    await self.output_mode_action(mode)
-            except WholeHouseError as exc:
-                await self.state.set_local_playback_only(previous_local_only)
-                await self.state.set_phono_output_mode(previous_phono_mode)
-                raise web.HTTPConflict(text=str(exc)) from exc
-            except Exception as exc:
-                await self.state.set_local_playback_only(previous_local_only)
-                await self.state.set_phono_output_mode(previous_phono_mode)
-                raise web.HTTPServiceUnavailable(text=str(exc)) from exc
-
-            await self.state.emit(
-                "output_mode_changed",
-                {
-                    "mode": mode.value,
-                    "local_playback_only": local_only,
-                    "source": "api",
-                },
-            )
-            return web.json_response(
-                {"mode": mode.value, "local_playback_only": local_only}
-            )
+        await self._set_canonical_output(mode, source="api")
+        local_only = mode is PhonoOutputMode.LOCAL
+        return web.json_response(
+            {"mode": mode.value, "local_playback_only": local_only}
+        )
 
     async def set_whole_house(self, request: web.Request) -> web.Response:
         body = await request.json()
         requested = body.get("enabled")
         if not isinstance(requested, bool):
             raise web.HTTPBadRequest(text="enabled must be a boolean")
-        async with self._whole_house_lock:
-            if requested and not self.whole_house_available:
-                raise web.HTTPConflict(
-                    text=(
-                        "whole-house vinyl is unavailable until Sendspin source "
-                        "support is enabled"
-                    )
-                )
+        mode = (
+            PhonoOutputMode.DOWNSTAIRS
+            if requested
+            else PhonoOutputMode.LOCAL
+        )
+        warning = await self._set_canonical_output(
+            mode, source="api_whole_house"
+        )
+        payload: dict[str, object] = {"enabled": requested}
+        if warning is not None:
+            payload["warning"] = warning
+        return web.json_response(payload, status=202 if warning else 200)
 
-            # Clearing the local request is fail-safe and must not depend on a
-            # remote server. It immediately releases local routing even if MA
-            # is offline; the response still reports that the remote stop was
-            # not confirmed.
-            if not requested:
-                await self.state.request_whole_house(False)
-                await self.state.emit(
-                    "whole_house_request_changed",
-                    {"enabled": False, "source": "api"},
-                )
-                if self.whole_house_action is not None:
-                    try:
-                        async with asyncio.timeout(10):
-                            await self.whole_house_action(False)
-                    except Exception as exc:
-                        await self.state.emit(
-                            "whole_house_remote_stop_unconfirmed",
-                            {"error": str(exc)},
-                        )
-                        return web.json_response(
-                            {
-                                "enabled": False,
-                                "warning": f"remote stop was not confirmed: {exc}",
-                            },
-                            status=202,
-                        )
-                return web.json_response({"enabled": False})
-
-            if self.whole_house_action is not None:
-                try:
-                    async with asyncio.timeout(10):
-                        await self.whole_house_action(True)
-                except WholeHouseError as exc:
-                    raise web.HTTPConflict(text=str(exc)) from exc
-                except Exception as exc:
-                    raise web.HTTPBadGateway(
-                        text=f"whole-house request failed: {exc}"
-                    ) from exc
-            await self.state.request_whole_house(True)
-            await self.state.emit(
-                "whole_house_request_changed", {"enabled": True, "source": "api"}
+    async def _set_canonical_output(
+        self, mode: PhonoOutputMode, *, source: str
+    ) -> str | None:
+        """Map every public control onto one serialized output intent."""
+        previous = self.state.output_target
+        target = (
+            OutputTarget.DOWNSTAIRS
+            if mode is PhonoOutputMode.DOWNSTAIRS
+            else OutputTarget.CONSOLE
+        )
+        if target is OutputTarget.DOWNSTAIRS and not self.whole_house_available:
+            raise web.HTTPConflict(
+                text="Downstairs is unavailable until Sendspin source support is enabled"
             )
-            return web.json_response({"enabled": True})
+        generation = await self.state.set_output_target(target)
+        async with self._output_mode_lock:
+            if generation != self.state.routing_generation:
+                return None
+            try:
+                if self.output_mode_action is not None:
+                    await self.output_mode_action(mode)
+                elif self.phono_output_action is not None:
+                    await self.phono_output_action(mode)
+                elif self.local_only_action is not None:
+                    await self.local_only_action(mode is PhonoOutputMode.LOCAL)
+                elif self.whole_house_action is not None:
+                    await self.whole_house_action(
+                        mode is PhonoOutputMode.DOWNSTAIRS
+                    )
+            except WholeHouseError as exc:
+                if target is OutputTarget.CONSOLE:
+                    warning = f"remote stop was not confirmed: {exc}"
+                    await self.state.emit(
+                        "output_remote_stop_unconfirmed", {"error": str(exc)}
+                    )
+                    return warning
+                if generation == self.state.routing_generation:
+                    await self.state.set_output_target(previous, increment=False)
+                raise web.HTTPConflict(text=str(exc)) from exc
+            except Exception as exc:
+                if target is OutputTarget.CONSOLE:
+                    await self.state.emit(
+                        "output_remote_stop_unconfirmed", {"error": str(exc)}
+                    )
+                else:
+                    if generation == self.state.routing_generation:
+                        await self.state.set_output_target(previous, increment=False)
+                    raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+            await self.state.emit(
+                "output_mode_changed",
+                {
+                    "mode": mode.value,
+                    "requested_output": target.value,
+                    "generation": generation,
+                    "source": source,
+                },
+            )
+            return None
 
     def application(self) -> web.Application:
         app = web.Application(middlewares=[self.authenticate])

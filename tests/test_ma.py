@@ -175,6 +175,36 @@ def test_failed_play_request_can_retry_immediately() -> None:
     asyncio.run(scenario())
 
 
+def test_stop_invalidates_an_in_flight_start_before_stopping() -> None:
+    async def scenario() -> None:
+        state = MusicAssistantState(
+            "http://ma", None, "Phono Console", SimulatedEventSink()
+        )
+        client = FakeClient()
+        gate = asyncio.Event()
+        client.player_queues.play_gate = gate
+        state._client = client  # type: ignore[assignment]
+        state._ensure_connected = _noop  # type: ignore[method-assign]
+
+        start = asyncio.create_task(
+            state.play_vinyl_source("source-client-id", ["Phono Console"])
+        )
+        await asyncio.sleep(0)
+        await state.stop_players(["Phono Console"])
+
+        assert start.cancelled()
+        assert client.player_queues.stop_calls == ["console-id"]
+        gate.set()
+        assert await state.play_vinyl_source(
+            "source-client-id", ["Phono Console"]
+        ) == ["console-id"]
+        # The cancelled request never crosses the gated play_media call; the
+        # fresh request is not suppressed by its former cache entry.
+        assert len(client.player_queues.play_calls) == 1
+
+    asyncio.run(scenario())
+
+
 def test_settling_timeout_is_logged_before_retry() -> None:
     async def scenario() -> None:
         events = SimulatedEventSink()

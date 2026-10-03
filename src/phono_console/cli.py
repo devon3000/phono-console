@@ -11,7 +11,7 @@ from .diagnostics import diagnose
 from .alsa import ArecordLevelMonitor
 from .events import LoggingEventSink
 from .terminal_meter import run_terminal_meter
-from .policy import Inputs, choose_route
+from .policy import Inputs, PhonoOutputMode, choose_route
 from .runtime import configure_logging, run_daemon
 from .simulation import (
     SimulatedAudioRouter,
@@ -70,7 +70,12 @@ def main() -> int:
     inputs = Inputs(
         phono_active=args.phono_active,
         ma_playing=args.ma_playing,
-        whole_house_requested=args.whole_house,
+        distribution_available=args.whole_house,
+        phono_output_mode=(
+            PhonoOutputMode.DOWNSTAIRS
+            if args.whole_house
+            else PhonoOutputMode.LOCAL
+        ),
     )
     print(json.dumps({"route": choose_route(inputs).value}))
     return 0

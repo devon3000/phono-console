@@ -31,7 +31,7 @@ from .events import LoggingEventSink
 from .ma import MusicAssistantState
 from .processes import ManagedProcess, ProcessSpec, SubprocessLauncher
 from .router import ProcessAudioRouter
-from .policy import PhonoOutputMode, Route, Source
+from .policy import OutputTarget, PhonoOutputMode, Route, RoutingPhase, Source
 from .sendspin_source import SendspinSourcePublisher
 from .state import StateStore
 
@@ -119,6 +119,7 @@ def distribution_needs_start(
 
 async def run_daemon(config: Config) -> None:
     state = StateStore()
+    output_target_path = Path(config.sendspin.state_dir) / "output-target"
     local_only_marker = Path(config.sendspin.state_dir) / "local-playback-only"
     phono_downstairs_marker = Path(config.sendspin.state_dir) / "phono-downstairs"
     local_phono_volume_path = Path(config.sendspin.state_dir) / "local-phono-volume"
@@ -128,7 +129,6 @@ async def run_daemon(config: Config) -> None:
             local_phono_volume = max(
                 0, min(100, int(local_phono_volume_path.read_text().strip()))
             )
-    await state.set_local_playback_only(local_only_marker.exists())
     sticky_seconds = config.routing.phono_mode_sticky_minutes * 60
     marker_is_fresh = (
         phono_downstairs_marker.exists()
@@ -136,9 +136,19 @@ async def run_daemon(config: Config) -> None:
     )
     if phono_downstairs_marker.exists() and not marker_is_fresh:
         phono_downstairs_marker.unlink(missing_ok=True)
-    await state.set_phono_output_mode(
-        PhonoOutputMode.DOWNSTAIRS if marker_is_fresh else PhonoOutputMode.LOCAL
-    )
+    if output_target_path.exists():
+        with suppress(ValueError):
+            state.output_target = OutputTarget(output_target_path.read_text().strip())
+    elif local_only_marker.exists():
+        state.output_target = OutputTarget.CONSOLE
+    elif marker_is_fresh:
+        state.output_target = OutputTarget.DOWNSTAIRS
+    output_target_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_target_path = output_target_path.with_suffix(".tmp")
+    temporary_target_path.write_text(f"{state.output_target.value}\n")
+    os.replace(temporary_target_path, output_target_path)
+    local_only_marker.unlink(missing_ok=True)
+    phono_downstairs_marker.unlink(missing_ok=True)
     events = CompositeEventSink(LoggingEventSink(), state)
     amplifier = CecAmplifier(config.amplifier, events, state)
     bluetooth_manager = BluetoothManager(config.bluetooth, events, state)
@@ -238,20 +248,16 @@ async def run_daemon(config: Config) -> None:
     whole_house_action = None
     if config.sendspin.source_enabled:
         async def source_stopped(source: Source) -> None:
-            if source is not Source.PHONO:
-                return
-            phono_downstairs_marker.unlink(missing_ok=True)
-            await state.set_phono_output_mode(PhonoOutputMode.LOCAL)
-            # source.stop makes Local authoritative, not merely cosmetic.
-            # Otherwise the next phono signal can line-sense auto-start the
-            # previous MA target while the dashboard still says Console.
-            if publisher is not None:
-                await publisher.set_source_distribution_enabled(
-                    Source.PHONO, False
-                )
+            # A bridge rebuild and an explicit MA stop are indistinguishable
+            # at this layer. Treat source.stop as session telemetry; it must
+            # never rewrite the user's persisted Console/Downstairs choice.
             await events.emit(
-                "phono_output_mode_changed",
-                {"mode": PhonoOutputMode.LOCAL.value, "source": "music_assistant_stop"},
+                "distribution_source_stopped",
+                {
+                    "source": source.value,
+                    "requested_output": state.output_target.value,
+                    "generation": state.routing_generation,
+                },
             )
 
         publisher = SendspinSourcePublisher(
@@ -284,10 +290,16 @@ async def run_daemon(config: Config) -> None:
             ),
             phono_activity_hysteresis_db=config.detection.hysteresis_db,
         )
-        await publisher.set_distribution_enabled(not state.local_playback_only)
+        await publisher.set_distribution_enabled(
+            state.output_target is OutputTarget.DOWNSTAIRS
+        )
         await publisher.set_source_distribution_enabled(
             Source.PHONO,
-            state.phono_output_mode is PhonoOutputMode.DOWNSTAIRS,
+            state.output_target is OutputTarget.DOWNSTAIRS,
+        )
+        await publisher.set_source_distribution_enabled(
+            Source.BLUETOOTH,
+            state.output_target is OutputTarget.DOWNSTAIRS,
         )
 
         async def whole_house_action(enabled: bool) -> None:
@@ -328,22 +340,42 @@ async def run_daemon(config: Config) -> None:
     )
 
     def distribution_available() -> bool:
+        active_source = (
+            Source.PHONO
+            if state.status is not None and state.status.phono_active
+            else (
+                Source.BLUETOOTH
+                if state.status is not None and state.status.bluetooth_active
+                else Source.NONE
+            )
+        )
         phono_stop_grace = bool(
-            publisher is not None
+            state.output_target is OutputTarget.DOWNSTAIRS
+            and publisher is not None
             and publisher.phono_stop_pending
             and state.status is not None
             and state.status.route is Route.DISTRIBUTED_PHONO
+            and state.routing_session_generation == state.routing_generation
         )
         return bool(
             phono_stop_grace
             or (
-                not state.local_playback_only
+                state.output_target is OutputTarget.DOWNSTAIRS
                 and publisher is not None
                 and state.sendspin_source.get("connected")
                 and state.sendspin_source.get("stream_requested")
+                and state.sendspin_source.get("streaming")
+                and state.sendspin_source.get("selected_source")
+                == active_source.value
                 and publisher.stream_healthy
                 and state.music_assistant.get("connected")
                 and music_assistant.console_playing
+                and music_assistant.player_is_playing(
+                    config.routing.distribution_target
+                )
+                and state.routing_session_generation
+                == state.routing_generation
+                and state.routing_session_source is active_source
             )
         )
 
@@ -354,10 +386,10 @@ async def run_daemon(config: Config) -> None:
                 source is Source.BLUETOOTH
                 and timestamped_bluetooth is not None
                 or source is Source.PHONO
-                and state.phono_output_mode is PhonoOutputMode.DOWNSTAIRS
+                and state.output_target is OutputTarget.DOWNSTAIRS
                 and not publisher.phono_stop_pending
             )
-            and not state.local_playback_only
+            and state.output_target is OutputTarget.DOWNSTAIRS
             and publisher.client_id is not None
             and state.sendspin_source.get("connected")
             and (
@@ -386,46 +418,6 @@ async def run_daemon(config: Config) -> None:
                 return False
         return bool(state.sendspin_source.get("stream_requested"))
 
-    async def expire_phono_output_mode() -> None:
-        phono_downstairs_marker.unlink(missing_ok=True)
-        await state.set_phono_output_mode(PhonoOutputMode.LOCAL)
-        if publisher is not None:
-            await publisher.set_source_distribution_enabled(Source.PHONO, False)
-        if (
-            state.status is not None
-            and state.status.route is Route.DISTRIBUTED_PHONO
-        ):
-            try:
-                await music_assistant.stop_players(
-                    (config.routing.distribution_target,)
-                )
-            except Exception as exc:
-                await events.emit(
-                    "phono_output_remote_stop_unconfirmed", {"error": str(exc)}
-                )
-        await events.emit(
-            "phono_output_mode_expired",
-            {"mode": PhonoOutputMode.LOCAL.value},
-        )
-
-    async def refresh_phono_output_mode() -> None:
-        # mtime is the restart-safe last-activity timestamp. Refresh at most
-        # once per minute while a record is active (enforced by Controller).
-        phono_downstairs_marker.touch()
-
-    async def inherit_distributed_phono_mode() -> None:
-        phono_downstairs_marker.touch()
-        await state.set_phono_output_mode(PhonoOutputMode.DOWNSTAIRS)
-        if publisher is not None:
-            await publisher.set_source_distribution_enabled(Source.PHONO, True)
-        await events.emit(
-            "phono_output_mode_changed",
-            {
-                "mode": PhonoOutputMode.DOWNSTAIRS.value,
-                "source": "inherited_bluetooth_distribution",
-            },
-        )
-
     controller = Controller(
         config,
         monitor,
@@ -451,9 +443,6 @@ async def run_daemon(config: Config) -> None:
             (config.routing.distribution_target,)
         ),
         phono_output_mode=lambda: state.phono_output_mode,
-        expire_phono_output_mode=expire_phono_output_mode,
-        refresh_phono_output_mode=refresh_phono_output_mode,
-        inherit_distributed_phono_mode=inherit_distributed_phono_mode,
         activate_output=amplifier.power_on,
         activate_route=activate_route,
     )
@@ -518,105 +507,89 @@ async def run_daemon(config: Config) -> None:
         if bluetooth_monitor is not None:
             bluetooth_monitor.session.reset()
 
-    async def local_only_action(enabled: bool) -> None:
-        local_only_marker.parent.mkdir(parents=True, exist_ok=True)
-        if enabled:
-            local_only_marker.touch()
-        else:
-            local_only_marker.unlink(missing_ok=True)
-        if publisher is not None:
-            await publisher.set_distribution_enabled(not enabled)
-        if enabled:
-            try:
-                await music_assistant.stop_players(
-                    (config.routing.distribution_target,)
-                )
-            except Exception as exc:
-                # Local-only is specifically an outage/troubleshooting mode;
-                # it must still engage when MA cannot confirm the remote stop.
-                await events.emit(
-                    "local_only_remote_stop_unconfirmed", {"error": str(exc)}
-                )
+    output_transition_lock = asyncio.Lock()
 
-    async def phono_output_action(mode: PhonoOutputMode) -> None:
-        phono_downstairs_marker.parent.mkdir(parents=True, exist_ok=True)
-        if mode is PhonoOutputMode.DOWNSTAIRS:
-            if state.local_playback_only:
-                raise WholeHouseError("turn off Local Only before using Downstairs")
-            if publisher is None or publisher.client_id is None:
-                raise WholeHouseError("Sendspin source is not connected")
-            await publisher.set_source_distribution_enabled(Source.PHONO, True)
-            # Choosing the mode while idle only changes the sticky preference.
-            # If a record is already playing, move it immediately; otherwise
-            # the controller starts distribution when it first detects phono.
-            if state.status is not None and state.status.phono_active:
-                # Keep direct monitoring active while MA starts and buffers
-                # the synchronized return path. The controller switches the
-                # exclusive physical output after MA confirms console playback.
-                await publisher.select_source(Source.PHONO)
-                started = await music_assistant.play_vinyl_source(
-                    publisher.client_id, (config.routing.distribution_target,)
+    def persist_output_target(target: OutputTarget) -> None:
+        output_target_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output_target_path.with_suffix(".tmp")
+        temporary.write_text(f"{target.value}\n")
+        os.replace(temporary, output_target_path)
+
+    async def output_mode_action(mode: PhonoOutputMode) -> None:
+        """Serialize and apply the one authoritative output choice."""
+        target = (
+            OutputTarget.DOWNSTAIRS
+            if mode is PhonoOutputMode.DOWNSTAIRS
+            else OutputTarget.CONSOLE
+        )
+        async with output_transition_lock:
+            generation = state.routing_generation
+            if state.output_target is not target:
+                return
+            persist_output_target(target)
+
+            status = state.status
+            source = (
+                Source.PHONO
+                if status is not None and status.phono_active
+                else (
+                    Source.BLUETOOTH
+                    if status is not None and status.bluetooth_active
+                    else Source.NONE
                 )
-                if not started:
+            )
+            if target is OutputTarget.CONSOLE:
+                if publisher is not None:
+                    await publisher.set_distribution_enabled(False)
                     await publisher.set_source_distribution_enabled(
                         Source.PHONO, False
                     )
-                    raise WholeHouseError(
-                        "Downstairs was not found in Music Assistant"
+                    await publisher.set_source_distribution_enabled(
+                        Source.BLUETOOTH, False
                     )
-            phono_downstairs_marker.touch()
-        else:
-            phono_downstairs_marker.unlink(missing_ok=True)
-            if publisher is not None:
-                await publisher.set_source_distribution_enabled(Source.PHONO, False)
-            # Do not interrupt Bluetooth merely because the phono preference
-            # changed while Bluetooth owns the shared Downstairs target.
-            if (
-                state.status is not None
-                and state.status.route is Route.DISTRIBUTED_PHONO
-            ):
                 try:
                     await music_assistant.stop_players(
                         (config.routing.distribution_target,)
                     )
                 except Exception as exc:
                     await events.emit(
-                        "phono_output_remote_stop_unconfirmed", {"error": str(exc)}
+                        "output_remote_stop_unconfirmed", {"error": str(exc)}
                     )
+                await state.set_routing_state(RoutingPhase.STABLE)
+                return
 
-    async def output_mode_action(mode: PhonoOutputMode) -> None:
-        """Apply one authoritative output choice to every live source."""
-        local = mode is PhonoOutputMode.LOCAL
-        await local_only_action(local)
-        await phono_output_action(mode)
-
-        if local:
-            return
-        if publisher is None or publisher.client_id is None:
-            raise WholeHouseError("Sendspin source is not connected")
-
-        status = state.status
-        if status is None:
-            return
-        source = (
-            Source.PHONO
-            if status.phono_active
-            else Source.BLUETOOTH if status.bluetooth_active else Source.NONE
-        )
-        if source is Source.NONE:
-            return
-
-        # phono_output_action already starts an active record. Bluetooth used
-        # to be left for a later controller tick, which made the button appear
-        # to do nothing and allowed stale MA telemetry to win the race.
-        if source is Source.BLUETOOTH:
+            if publisher is None or publisher.client_id is None:
+                await state.set_routing_state(
+                    RoutingPhase.DEGRADED,
+                    error="Sendspin source is not connected; playing locally",
+                )
+                return
+            await publisher.set_distribution_enabled(True)
+            await publisher.set_source_distribution_enabled(Source.PHONO, True)
+            await publisher.set_source_distribution_enabled(Source.BLUETOOTH, True)
+            if source is Source.NONE:
+                await state.set_routing_state(RoutingPhase.STABLE)
+                return
+            await state.set_routing_state(
+                RoutingPhase.STARTING_DISTRIBUTION,
+                session_generation=generation,
+                session_source=source,
+            )
             await publisher.select_source(source)
             started = await music_assistant.play_vinyl_source(
                 publisher.client_id, (config.routing.distribution_target,)
             )
+            if generation != state.routing_generation:
+                return
             if not started:
-                raise WholeHouseError(
-                    f"{config.routing.distribution_target} was not found in Music Assistant"
+                await state.set_routing_state(
+                    RoutingPhase.DEGRADED,
+                    session_generation=generation,
+                    session_source=source,
+                    error=(
+                        f"{config.routing.distribution_target} was not found; "
+                        "playing locally"
+                    ),
                 )
 
     async def hardware_volume_action(delta: int) -> None:
@@ -672,8 +645,8 @@ async def run_daemon(config: Config) -> None:
         route = status.route if status is not None else Route.IDLE
         command = press_command_for_route(route)
         if command is PressCommand.PHONO_DOWNSTAIRS:
-            await phono_output_action(PhonoOutputMode.DOWNSTAIRS)
-            await state.set_phono_output_mode(PhonoOutputMode.DOWNSTAIRS)
+            await state.set_output_target(OutputTarget.DOWNSTAIRS)
+            await output_mode_action(PhonoOutputMode.DOWNSTAIRS)
             await events.emit(
                 "phono_output_mode_changed",
                 {
@@ -682,8 +655,8 @@ async def run_daemon(config: Config) -> None:
                 },
             )
         elif command is PressCommand.PHONO_LOCAL:
-            await phono_output_action(PhonoOutputMode.LOCAL)
-            await state.set_phono_output_mode(PhonoOutputMode.LOCAL)
+            await state.set_output_target(OutputTarget.CONSOLE)
+            await output_mode_action(PhonoOutputMode.LOCAL)
             await events.emit(
                 "phono_output_mode_changed",
                 {
@@ -696,9 +669,7 @@ async def run_daemon(config: Config) -> None:
                 await music_assistant.stop_players(
                     (config.routing.distribution_target,)
                 )
-                # Music Assistant's source.stop is forwarded to AVRCP by the
-                # source publisher, keeping the phone and group transition in
-                # one ordered control path.
+                await bluetooth_manager.media_command("pause")
             else:
                 await bluetooth_manager.media_command("pause")
         elif command is PressCommand.STOP_MA:
@@ -739,8 +710,6 @@ async def run_daemon(config: Config) -> None:
         amplifier_volume_action=(
             amplifier_volume_action if config.amplifier.enabled else None
         ),
-        local_only_action=local_only_action,
-        phono_output_action=phono_output_action,
         output_mode_action=output_mode_action,
     )
     # Dashboard polling happens four times per second and otherwise buries the

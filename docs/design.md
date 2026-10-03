@@ -7,10 +7,10 @@
 2. The turntable is permanently connected to the UFO202 phono input.
 3. The Pi is the only router; source changes are signal-driven and require no
    physical or dashboard source switch.
-4. Phono defaults to direct local playback. Its user-selected output mode is
-   session-sticky across short silence and record changes, then expires to local.
-5. The optional synchronized phono mode and normal Bluetooth mode return to
-   the console through Music Assistant so the Downstairs group stays aligned.
+4. There is one user-selected output target, Console or Downstairs, shared by
+   phono and Bluetooth. It persists across source and process restarts.
+5. Downstairs playback returns to the console through Music Assistant so the
+   group stays aligned. Until that route is confirmed, the source stays local.
 6. Local vinyl uses a short software loopback and targets less than 50 ms
    round-trip latency after signal detection.
 
@@ -20,7 +20,7 @@
 | --- | --- | --- | --- |
 | `idle` | Monitored | Silence | Off |
 | `local_phono` | Monitored | Minimum-latency default | Disabled |
-| `local_bluetooth` | Monitored | Low-latency fallback | Unavailable |
+| `local_bluetooth` | Monitored | Low-latency direct/fallback | Disabled or starting |
 | `ma_playback` | Monitored | MA stream | Off |
 | `distributed_phono` | Active | Returned MA stream | Phono capture |
 | `distributed_bluetooth` | Active | Returned MA stream | Bluetooth capture |
@@ -32,10 +32,9 @@ The automatically selected phono/Bluetooth source uses Sendspin's source role
 to expose `Console Input` as a native Music Assistant audio source. The daemon runs an in-process source
 client (aiosendspin) with a persistent identity and pairing store; the Music
 Assistant `sendspin_source` plugin commands when streaming starts and stops.
-The controller plays Bluetooth on `Downstairs` automatically. Phono is direct
-local by default and moves to the same synchronized path only when the user
-selects **Synchronized Downstairs**. That preference is output routing, not
-manual source selection.
+The user selects **Console** or **Synchronized Downstairs** once. That output
+intent applies to whichever physical source wins automatic source selection;
+it is not a manual source selector.
 
 ## Automatic policy
 
@@ -46,14 +45,12 @@ Inputs to the policy engine:
 - `ma_playing`: derived from Music Assistant player state for the console.
 - `bluetooth_active`: decoded Bluetooth PCM above threshold; connection alone
   is not activity.
-- `phono_output_mode`: persistent `local` or `downstairs` user preference.
-- `phono_mode_sticky_minutes`: inactivity before Downstairs expires to local
-  (60 minutes by default).
+- `output_target`: the sole persisted `console` or `downstairs` preference.
 - distribution health: the Sendspin source, MA API, target, and return path.
 
 Priority, highest first: active phono, actively streaming Bluetooth, Music
-Assistant playback, idle. Phono's default local route is deliberate; its
-Downstairs mode and Bluetooth distribution target the fixed `Downstairs` group.
+Assistant playback, idle. Both physical sources use the selected output target,
+and distribution targets the fixed `Downstairs` group.
 When a requested distributed path is unavailable, playback falls back locally
 without changing the stored preference.
 
