@@ -280,6 +280,7 @@ class Controller:
             self._phono_mode_last_refresh = None
         bluetooth_level = -120.0
         bluetooth_active = bluetooth_transport_playing
+        bluetooth_pcm_ready = False
         bluetooth_capture_ok = self.bluetooth_monitor is not None
         if self.bluetooth_monitor is not None and not phono_signal_present:
             try:
@@ -294,6 +295,12 @@ class Controller:
                     self.bluetooth_detector.reset_inactive()
                 await self._set_component("bluetooth_audio", "degraded", str(exc))
             else:
+                # Detector release and AVRCP metadata can outlive the PCM
+                # transport during a call. Neither can authorize a new stream.
+                bluetooth_pcm_ready = bool(
+                    self.bluetooth_is_playing is None
+                    or self.bluetooth_is_playing()
+                )
                 detected = self.bluetooth_detector.update(bluetooth_level, timestamp)
                 if bluetooth_transport_playing:
                     self.bluetooth_detector.force_active()
@@ -339,11 +346,15 @@ class Controller:
         distribution_pending = False
         capable = await self._distribution_is_capable(selected_source)
         stream_healthy = await self._distribution_stream_is_healthy()
+        can_start_distribution = bool(
+            selected_source is not Source.BLUETOOTH or bluetooth_pcm_ready
+        )
         if (
             distribution_required
             and selected_source is not Source.NONE
             and not available
             and capable
+            and can_start_distribution
         ):
             should_prepare = self._distribution_pending_source is not selected_source
             if (
@@ -481,6 +492,7 @@ class Controller:
             desired_route in {Route.DISTRIBUTED_PHONO, Route.DISTRIBUTED_BLUETOOTH}
             and desired_route != self.route
             and self.prepare_distribution is not None
+            and can_start_distribution
         ):
             try:
                 prepared = await self.prepare_distribution(route_source(desired_route))

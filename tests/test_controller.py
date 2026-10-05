@@ -624,6 +624,56 @@ def test_distributed_bluetooth_releases_after_detector_hold() -> None:
     asyncio.run(scenario())
 
 
+def test_bluetooth_call_waits_for_pcm_and_phone_resume_before_restarting() -> None:
+    async def scenario() -> None:
+        class Monitor(SimulatedLevelMonitor):
+            unavailable = False
+
+            async def level_dbfs(self):
+                if self.unavailable:
+                    raise RuntimeError("no Bluetooth PCM")
+                return self.level
+
+        bluetooth = Monitor()
+        bluetooth.level = -20
+        playing = True
+        ready = True
+        prepared = []
+
+        async def prepare(source):
+            prepared.append(source)
+            return True
+
+        subject = Controller(
+            config(), SimulatedLevelMonitor(), SimulatedMusicAssistant(),
+            SimulatedAudioRouter(), SimulatedEventSink(),
+            bluetooth_monitor=bluetooth,
+            bluetooth_is_playing=lambda: playing,
+            distribution_available=lambda: ready,
+            distribution_capable=lambda _source: True,
+            distribution_stream_healthy=lambda: ready,
+            prepare_distribution=prepare,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
+        )
+        await subject.tick(now=0)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        prepared.clear()
+        ready = False
+        playing = False
+        # Even queued loud PCM / detector release must not restart the group.
+        await subject.tick(now=0.5)
+        assert prepared == []
+        playing = True
+        bluetooth.unavailable = True
+        await subject.tick(now=1)
+        assert prepared == []
+        bluetooth.unavailable = False
+        await subject.tick(now=2)
+        assert len(prepared) == 1
+
+    asyncio.run(scenario())
+
+
 def test_distributed_bluetooth_survives_transient_ma_unavailability() -> None:
     async def scenario() -> None:
         phono = SimulatedLevelMonitor()

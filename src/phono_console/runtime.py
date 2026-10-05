@@ -402,6 +402,13 @@ async def run_daemon(config: Config) -> None:
     async def prepare_distribution(source: Source) -> bool:
         if publisher is None or publisher.client_id is None:
             return False
+        if source is Source.BLUETOOTH and (
+            bluetooth_manager.playback_status != "playing"
+            or bluetooth_monitor is None
+            or bluetooth_monitor.health.get("last_sample_age_seconds") is None
+            or bluetooth_monitor.health.get("last_sample_age_seconds", 999) > 0.5
+        ):
+            return False
         if source is Source.PHONO and publisher.phono_stop_pending:
             return False
         await publisher.select_source(source)
@@ -569,6 +576,15 @@ async def run_daemon(config: Config) -> None:
             await publisher.set_source_distribution_enabled(Source.BLUETOOTH, True)
             if source is Source.NONE:
                 await state.set_routing_state(RoutingPhase.STABLE)
+                return
+            if source is Source.BLUETOOTH and (
+                bluetooth_manager.playback_status != "playing"
+                or bluetooth_monitor is None
+                or bluetooth_monitor.health.get("last_sample_age_seconds") is None
+                or bluetooth_monitor.health.get("last_sample_age_seconds", 999) > 0.5
+            ):
+                # The controller will start distribution once PCM resumes.
+                await state.set_routing_state(RoutingPhase.STARTING_DISTRIBUTION)
                 return
             await state.set_routing_state(
                 RoutingPhase.STARTING_DISTRIBUTION,
