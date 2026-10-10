@@ -28,7 +28,7 @@ PlaybackProcessFactory = Callable[[], Awaitable[PlaybackProcess]]
 
 
 class TimestampedLocalPlayback:
-    """Render engine PCM locally while adapting only to the output clock."""
+    """Render engine PCM through ALSA with bounded output backpressure."""
 
     def __init__(
         self,
@@ -40,6 +40,7 @@ class TimestampedLocalPlayback:
         *,
         max_soft_correction_ppm: int = 250,
         process_factory: PlaybackProcessFactory | None = None,
+        write_timeout_seconds: float = 2.0,
     ) -> None:
         self._frames = frames
         self.playback_device = playback_device
@@ -47,7 +48,8 @@ class TimestampedLocalPlayback:
         self.channels = channels
         self.events = events
         self.max_soft_correction_ppm = max_soft_correction_ppm
-        self._process_factory = process_factory or self._start_ffmpeg
+        self._process_factory = process_factory or self._start_aplay
+        self.write_timeout_seconds = write_timeout_seconds
         self._process: PlaybackProcess | None = None
         self._pump_task: asyncio.Task[None] | None = None
         self._last_error: str | None = None
@@ -60,37 +62,26 @@ class TimestampedLocalPlayback:
             round(self.sample_rate * self.max_soft_correction_ppm / 1_000_000),
         )
 
-    async def _start_ffmpeg(self) -> PlaybackProcess:
-        # FFmpeg's ``async`` value is the maximum number of samples per second
-        # that aresample may stretch or squeeze. The previous value of 1000 at
-        # 48 kHz allowed about 2% pitch/speed modulation. Convert the intended
-        # ppm clock-correction ceiling into samples/second instead (250 ppm at
-        # 48 kHz is 12 samples/second).
+    async def _start_aplay(self) -> PlaybackProcess:
+        # Engine PCM is already at the output rate. aplay supplies ALSA xrun
+        # recovery without a second resampling stage. Start after 100 ms of
+        # queued audio, with 250 ms of hardware buffering for arrival jitter.
         return await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-f",
-            "s16le",
-            "-sample_rate",
-            str(self.sample_rate),
-            "-ac",
-            str(self.channels),
-            "-i",
-            "pipe:0",
-            "-af",
-            (
-                f"aresample={self.sample_rate}:"
-                f"async={self.async_samples_per_second}"
-            ),
-            "-ar",
-            str(self.sample_rate),
-            "-ac",
-            str(self.channels),
-            "-f",
-            "alsa",
+            "aplay",
+            "-q",
+            "-D",
             self.playback_device,
+            "-t",
+            "raw",
+            "-f",
+            "S16_LE",
+            "-r",
+            str(self.sample_rate),
+            "-c",
+            str(self.channels),
+            "--buffer-time=250000",
+            "--period-time=20000",
+            "--start-delay=100000",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=None,
@@ -112,6 +103,7 @@ class TimestampedLocalPlayback:
             "message": "running" if self.running else (self._last_error or "stopped"),
             "process": "timestamped_bluetooth_playback",
             "playback_device": self.playback_device,
+            "backend": "aplay",
             "uptime_seconds": (
                 None
                 if self._started_at is None
@@ -122,17 +114,9 @@ class TimestampedLocalPlayback:
     async def start(self) -> None:
         if self.running:
             return
-        if self._pump_task is not None:
-            with suppress(Exception):
-                await self._pump_task
-            self._pump_task = None
-        if self._process is not None:
-            returncode = self._process.returncode
-            self._process = None
-            raise RuntimeError(
-                self._last_error
-                or f"timestamped Bluetooth playback exited with status {returncode}"
-            )
+        # Reconcile replaces a dead/stalled output without abandoning its child.
+        if self._pump_task is not None or self._process is not None:
+            await self.stop()
         self._process = await self._process_factory()
         if self._process.stdin is None:
             self._process = None
@@ -161,7 +145,12 @@ class TimestampedLocalPlayback:
                 if process is None or process.stdin is None:
                     return
                 process.stdin.write(frame.pcm)
-                await process.stdin.drain()
+                try:
+                    await asyncio.wait_for(
+                        process.stdin.drain(), timeout=self.write_timeout_seconds
+                    )
+                except TimeoutError as exc:
+                    raise RuntimeError("local ALSA output stopped accepting PCM") from exc
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -192,7 +181,7 @@ class TimestampedLocalPlayback:
         if process.stdin is not None:
             with suppress(Exception):
                 process.stdin.close()
-                await process.stdin.wait_closed()
+                await asyncio.wait_for(process.stdin.wait_closed(), timeout=0.5)
         if process.returncode is None:
             process.terminate()
             try:
