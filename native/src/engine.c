@@ -5,6 +5,7 @@
 #include "phono_audio/protocol.h"
 
 #include <alsa/asoundlib.h>
+#include <dbus/dbus.h>
 #include <alloca.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -12,6 +13,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +24,55 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t running = 1;
+
+/* The BlueALSA PCM is absent while no phone is connected. Keep other ALSA
+ * errors visible, but do not report this normal idle state as an error. */
+static void capture_open_error(const char *file, int line, const char *function,
+                               int error, const char *format, ...) {
+    if (strstr(format, "Couldn't get BlueALSA PCM") != NULL &&
+        strstr(format, "PCM not found") != NULL) return;
+    /* Some plugin versions pass the reason through a format argument. */
+    char message[1024];
+    va_list arguments;
+    va_start(arguments, format);
+    (void)vsnprintf(message, sizeof(message), format, arguments);
+    va_end(arguments);
+    if (strstr(message, "Couldn't get BlueALSA PCM: PCM not found") != NULL) return;
+    fprintf(stderr, "ALSA %s:%d (%s): %s%s%s\n", file, line, function,
+            message, error ? ": " : "", error ? snd_strerror(error) : "");
+}
+
+static DBusConnection *watch_bluealsa(void) {
+    DBusError error;
+    dbus_error_init(&error);
+    DBusConnection *bus = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error);
+    if (bus != NULL) {
+        dbus_connection_set_exit_on_disconnect(bus, FALSE);
+        dbus_bus_add_match(bus,
+            "type='signal',sender='org.bluealsa',"
+            "interface='org.freedesktop.DBus.ObjectManager'", &error);
+        if (!dbus_error_is_set(&error))
+            dbus_bus_add_match(bus,
+                "type='signal',sender='org.bluealsa',"
+                "interface='org.freedesktop.DBus.Properties'", &error);
+        if (!dbus_error_is_set(&error))
+            dbus_bus_add_match(bus,
+                "type='signal',interface='org.freedesktop.DBus',"
+                "member='NameOwnerChanged',arg0='org.bluealsa'", &error);
+        dbus_connection_flush(bus);
+    }
+    if (dbus_error_is_set(&error)) {
+        fprintf(stderr, "BlueALSA event watch unavailable: %s; using retry fallback\n",
+                error.message);
+        if (bus != NULL) {
+            dbus_connection_close(bus);
+            dbus_connection_unref(bus);
+            bus = NULL;
+        }
+    }
+    dbus_error_free(&error);
+    return bus;
+}
 
 static void stop_engine(int signal_number) {
     (void)signal_number;
@@ -46,7 +97,10 @@ static int open_capture(
     snd_pcm_t *pcm = NULL;
     snd_pcm_hw_params_t *hw = NULL;
     snd_pcm_sw_params_t *sw = NULL;
+    const bool bluetooth = options->source == PHONO_AUDIO_SOURCE_BLUETOOTH;
+    if (bluetooth) snd_lib_error_set_handler(capture_open_error);
     int error = snd_pcm_open(&pcm, options->device, SND_PCM_STREAM_CAPTURE, 0);
+    if (bluetooth) snd_lib_error_set_handler(NULL);
     if (error < 0) return -1;
     snd_pcm_hw_params_alloca(&hw);
     if ((error = snd_pcm_hw_params_any(pcm, hw)) < 0 ||
@@ -218,19 +272,33 @@ static int capture_client(
     return client_gone ? 1 : 0;
 }
 
-static bool wait_for_capture_or_disconnect(int client) {
-    struct pollfd descriptor = {
-        .fd = client,
-        .events = POLLHUP | POLLERR,
-        .revents = 0,
+static bool wait_for_capture_or_disconnect(int client, DBusConnection *bus) {
+    int bus_fd = -1;
+    if (bus != NULL) (void)dbus_connection_get_unix_fd(bus, &bus_fd);
+    struct pollfd descriptors[2] = {
+        {.fd = client, .events = POLLHUP | POLLERR},
+        {.fd = bus_fd, .events = POLLIN},
     };
-    int result;
-    do {
-        result = poll(&descriptor, 1, 1000);
-    } while (result < 0 && errno == EINTR && running);
-    if (!running) return false;
-    if (result < 0) return false;
-    return (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL)) == 0;
+    while (running) {
+        if (bus != NULL) {
+            (void)dbus_connection_read_write(bus, 0);
+            DBusMessage *message;
+            bool changed = false;
+            while ((message = dbus_connection_pop_message(bus)) != NULL) {
+                if (dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_SIGNAL)
+                    changed = true;
+                dbus_message_unref(message);
+            }
+            if (changed || !dbus_connection_get_is_connected(bus)) return true;
+        }
+        /* Fallback covers missed signals and unavailable/restarted D-Bus. */
+        int result = poll(descriptors, 2, bus != NULL ? 30000 : 1000);
+        if (result < 0 && errno == EINTR) continue;
+        if (result < 0 || descriptors[0].revents & (POLLHUP | POLLERR | POLLNVAL))
+            return false;
+        if (result == 0) return true;
+    }
+    return false;
 }
 
 int phono_run_engine(const struct phono_engine_options *options) {
@@ -263,6 +331,8 @@ int phono_run_engine(const struct phono_engine_options *options) {
         return 1;
     }
     fprintf(stderr, "audio engine listening: %s\n", options->socket_path);
+    DBusConnection *bus = options->source == PHONO_AUDIO_SOURCE_BLUETOOTH
+        ? watch_bluealsa() : NULL;
     uint32_t epoch = 1;
     while (running) {
         int client = accept(server, NULL, NULL);
@@ -285,12 +355,21 @@ int phono_run_engine(const struct phono_engine_options *options) {
                         "capture unavailable: waiting for Bluetooth audio\n");
                 unavailable_logged = true;
             }
-            if (!wait_for_capture_or_disconnect(client)) break;
+            if (!wait_for_capture_or_disconnect(client, bus)) break;
+            if (bus != NULL && !dbus_connection_get_is_connected(bus)) {
+                dbus_connection_close(bus);
+                dbus_connection_unref(bus);
+                bus = watch_bluealsa();
+            }
         }
         close(client);
         epoch++;
     }
     close(server);
+    if (bus != NULL) {
+        dbus_connection_close(bus);
+        dbus_connection_unref(bus);
+    }
     (void)unlink(options->socket_path);
     return running ? 1 : 0;
 }
