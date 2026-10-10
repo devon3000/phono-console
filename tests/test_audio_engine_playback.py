@@ -114,3 +114,46 @@ def test_local_playback_caps_async_correction_to_configured_ppm() -> None:
 
     assert playback.max_soft_correction_ppm == 250
     assert playback.async_samples_per_second == 12
+
+
+def test_blocked_output_reports_failure_and_reconcile_replaces_child() -> None:
+    async def scenario():
+        class BlockedStdin(FakeStdin):
+            async def drain(self):
+                await asyncio.Event().wait()
+
+        first = FakeProcess()
+        first.stdin = BlockedStdin()
+        second = FakeProcess()
+        processes = iter((first, second))
+        queue = asyncio.Queue()
+
+        async def frames():
+            while True:
+                yield await queue.get()
+
+        async def start_process():
+            return next(processes)
+
+        events = FakeEvents()
+        playback = TimestampedLocalPlayback(
+            frames, "test_output", 48000, 2, events,
+            process_factory=start_process, write_timeout_seconds=0.01,
+        )
+        await playback.start()
+        await queue.put(TimestampedPcm(
+            source=AudioSource.BLUETOOTH, flags=FrameFlags.NONE,
+            sequence=1, first_sample_time_us=1, source_rate_hz=48000,
+            output_rate_hz=48000, channels=2, frames=1,
+            reported_transport_delay_us=0, epoch=1, pcm=b"\0" * 4,
+        ))
+        await asyncio.wait_for(playback._pump_task, timeout=1)
+        assert playback.health["status"] == "failed"
+        assert "stopped accepting PCM" in playback.health["message"]
+        await playback.start()
+        assert first.returncode == 0
+        assert first.stdin.closed
+        assert playback.running
+        await playback.stop()
+
+    asyncio.run(scenario())
