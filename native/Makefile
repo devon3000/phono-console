@@ -5,6 +5,8 @@ LDFLAGS ?=
 
 ALSA_CFLAGS := $(shell pkg-config --cflags alsa 2>/dev/null)
 ALSA_LIBS := $(shell pkg-config --libs alsa 2>/dev/null)
+DBUS_CFLAGS := $(shell pkg-config --cflags dbus-1 2>/dev/null)
+DBUS_LIBS := $(shell pkg-config --libs dbus-1 2>/dev/null)
 
 BUILD_DIR := build
 PROBE := $(BUILD_DIR)/phono-audio-engine
@@ -19,7 +21,8 @@ $(BUILD_DIR):
 
 $(PROBE): src/main.c src/probe.c src/engine.c src/clock_estimator.c include/phono_audio/probe.h include/phono_audio/engine.h include/phono_audio/protocol.h include/phono_audio/clock_estimator.h | $(BUILD_DIR)
 	@test -n "$(ALSA_LIBS)" || { echo "alsa development files not found (install libasound2-dev)" >&2; exit 1; }
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(ALSA_CFLAGS) -Iinclude src/main.c src/probe.c src/engine.c src/clock_estimator.c $(LDFLAGS) $(ALSA_LIBS) -lm -o $@
+	@test -n "$(DBUS_LIBS)" || { echo "D-Bus development files not found (install libdbus-1-dev)" >&2; exit 1; }
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(ALSA_CFLAGS) $(DBUS_CFLAGS) -Iinclude src/main.c src/probe.c src/engine.c src/clock_estimator.c $(LDFLAGS) $(ALSA_LIBS) $(DBUS_LIBS) -lm -o $@
 
 $(PROTOCOL_TEST): tests/test_protocol.c src/clock_estimator.c include/phono_audio/protocol.h include/phono_audio/clock_estimator.h | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Iinclude tests/test_protocol.c src/clock_estimator.c $(LDFLAGS) -lm -o $@
