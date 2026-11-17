@@ -1,19 +1,25 @@
 import asyncio
 from array import array
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import pytest
 
-from phono_console.config import AudioConfig, SendspinConfig
-from phono_console.controller import Status
+from phono_console.config import AudioConfig, SendspinConfig, load_config
+from phono_console.controller import Controller, Status
 from phono_console.audio_engine_protocol import AudioSource, FrameFlags, TimestampedPcm
-from phono_console.policy import Route, Source
+from phono_console.policy import PhonoOutputMode, Route, Source
 from phono_console.sendspin_source import (
     PeakLimiterS16le,
     SendspinSourcePublisher,
     apply_gain_s16le,
 )
-from phono_console.simulation import SimulatedEventSink
+from phono_console.simulation import (
+    SimulatedAudioRouter,
+    SimulatedEventSink,
+    SimulatedLevelMonitor,
+    SimulatedMusicAssistant,
+)
 from phono_console.state import StateStore
 
 AUDIO = AudioConfig(
@@ -726,6 +732,135 @@ def test_stream_pcm_silence_eventually_reports_absent() -> None:
         assert transitions == [True, False]
         stop.set()
         await asyncio.wait_for(run, timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("subscriber_overrun", [False, True])
+def test_server_stop_after_capture_failure_publishes_restartable_state(
+    subscriber_overrun: bool,
+) -> None:
+    async def broken_pcm():
+        frame = TimestampedPcm(
+            AudioSource.BLUETOOTH, FrameFlags.NONE, 1, 1_000_000,
+            48_000, 48_000, 2, 960, 0, 1, b"\0\0" * 2 * 960,
+        )
+        yield frame
+        yield replace(
+            frame, sequence=2, first_sample_time_us=1_020_000,
+            flags=FrameFlags.DISCONTINUITY,
+            subscriber_overrun=subscriber_overrun,
+        )
+
+    async def scenario() -> None:
+        client = FakeClient()
+        publisher, events, state = make_publisher(client)
+        publisher._client = client
+        publisher._connected = True
+        publisher._selected_source = Source.BLUETOOTH
+        publisher._source_distribution_enabled[Source.BLUETOOTH] = True
+        publisher.reconnect_seconds = 60
+        publisher._pcm_stream_factory = broken_pcm
+        await publisher._handle_server_command("start")
+        failed_task = publisher._stream_task
+        assert failed_task is not None
+        await failed_task
+        assert state.sendspin_source["stream_requested"] is True
+        assert state.sendspin_source["streaming"] is False
+        assert publisher._stream_retry_task is not None
+        assert len(client.captures[0].fed) == 1
+        discontinuities = [
+            payload for name, payload in events.events
+            if name == "sendspin_source_discontinuity"
+        ]
+        assert len(discontinuities) == 1
+        assert discontinuities[0]["subscriber_overrun"] is subscriber_overrun
+        assert discontinuities[0]["epoch"] == 1
+        assert discontinuities[0]["sequence"] == 2
+
+        # MA ends the failed session before the delayed retry. The controller
+        # must see that a new session can be requested, not a stale request
+        # for an unhealthy stream that permanently blocks distribution_capable.
+        await publisher._handle_server_command("stop")
+        assert publisher._stream_retry_task is None
+        assert state.sendspin_source["stream_requested"] is False
+        assert state.sendspin_source["error"] is None
+
+        publisher._pcm_stream_factory = endless_pcm
+        await publisher._handle_server_command("start")
+        await asyncio.sleep(0)
+        assert len(client.captures) == 2
+        assert publisher.stream_healthy
+        await publisher._stop_streaming()
+        assert state.sendspin_source["stream_requested"] is False
+        assert state.sendspin_source["streaming"] is False
+
+    asyncio.run(scenario())
+
+
+def test_controller_restarts_downstairs_after_failed_source_and_server_stop() -> None:
+    async def scenario() -> None:
+        client = FakeClient()
+        publisher, events, state = make_publisher(client)
+        publisher._client = client
+        publisher._connected = True
+        publisher._selected_source = Source.BLUETOOTH
+        publisher._source_distribution_enabled[Source.BLUETOOTH] = True
+        publisher.reconnect_seconds = 60
+        fail_capture = asyncio.Event()
+
+        async def interrupted_pcm():
+            yield b"\0\0" * 2 * 960
+            await fail_capture.wait()
+            raise RuntimeError("capture discontinuity")
+
+        publisher._pcm_stream_factory = interrupted_pcm
+        await publisher._handle_server_command("start")
+        failed_task = publisher._stream_task
+        await asyncio.sleep(0)
+        prepared = []
+
+        async def prepare(source):
+            prepared.append(source)
+            await publisher._handle_server_command("start")
+            await asyncio.sleep(0)
+            return True
+
+        settings = load_config(
+            Path(__file__).parents[1] / "config" / "phono-console.example.toml"
+        )
+        subject = Controller(
+            settings, SimulatedLevelMonitor(), SimulatedMusicAssistant(),
+            SimulatedAudioRouter(), events,
+            bluetooth_monitor=SimulatedLevelMonitor(level=-20.0),
+            distribution_available=lambda: publisher.stream_healthy,
+            # Same source-request/health gate used by runtime.
+            distribution_capable=lambda _source: (
+                not state.sendspin_source.get("stream_requested")
+                or publisher.stream_healthy
+            ),
+            distribution_stream_healthy=lambda: publisher.stream_healthy,
+            prepare_distribution=prepare,
+            release_distribution=lambda: publisher._handle_server_command("stop"),
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=1)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        fail_capture.set()
+        await failed_task
+        await subject.tick(now=2)
+        assert subject.route is Route.LOCAL_BLUETOOTH
+
+        publisher._pcm_stream_factory = endless_pcm
+        await subject.tick(now=3)
+        await subject.tick(now=4)
+        assert subject.route is Route.DISTRIBUTED_BLUETOOTH
+        assert prepared and all(source is Source.BLUETOOTH for source in prepared)
+        assert len(client.captures) == 2
+        await publisher.set_distribution_enabled(False)
+        assert publisher._stream_task is None
+        assert publisher._stream_retry_task is None
 
     asyncio.run(scenario())
 

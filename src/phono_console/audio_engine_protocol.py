@@ -41,6 +41,8 @@ class TimestampedPcm:
     reported_transport_delay_us: int
     epoch: int
     pcm: bytes
+    # Consumer-local provenance; not part of the native wire format.
+    subscriber_overrun: bool = False
 
     def encode(self) -> bytes:
         if self.frames * self.channels * 2 != len(self.pcm):

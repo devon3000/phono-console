@@ -79,6 +79,8 @@ class TimestampedBluetoothBackend:
             "socket": self.client.socket_path,
             "received_frames": metrics.received,
             "dropped_frames": metrics.dropped,
+            "active_subscriber_drops": metrics.active_subscriber_drops,
+            "idle_queue_drops": metrics.idle_queue_drops,
             "sequence_gaps": metrics.sequence_gaps,
             "discontinuities": metrics.discontinuities,
             "last_epoch": metrics.last_epoch,

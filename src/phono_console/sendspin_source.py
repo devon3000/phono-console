@@ -573,6 +573,18 @@ class SendspinSourcePublisher:
             async for chunk in stream:
                 if isinstance(chunk, TimestampedPcm):
                     if chunk.flags & FrameFlags.DISCONTINUITY and captured_frames:
+                        await self.events.emit(
+                            "sendspin_source_discontinuity",
+                            {
+                                "source": self._selected_source.value,
+                                "subscriber_overrun": chunk.subscriber_overrun,
+                                "flags": int(chunk.flags),
+                                "epoch": chunk.epoch,
+                                "sequence": chunk.sequence,
+                                "timestamp_us": chunk.first_sample_time_us,
+                                "captured_frames": captured_frames,
+                            },
+                        )
                         raise CaptureUnavailable(
                             "timestamped source capture crossed a discontinuity"
                         )
@@ -731,7 +743,10 @@ class SendspinSourcePublisher:
                 await task
         if was_streaming:
             await self.events.emit("sendspin_source_stream_stopped", {})
-            await self._publish_state()
+        # A failed pump already marked streaming false. Its subsequent server
+        # stop still clears stream_requested and cancels retry; the controller
+        # must see that change to permit a fresh distribution session.
+        await self._publish_state()
 
     async def _send_signal(self, present: bool) -> bool:
         client = self._client

@@ -21,6 +21,8 @@ MAX_PACKET_BYTES = HEADER_SIZE + 48_000 * 2 * 2
 class SourceMetrics:
     received: int = 0
     dropped: int = 0
+    active_subscriber_drops: int = 0
+    idle_queue_drops: int = 0
     discontinuities: int = 0
     sequence_gaps: int = 0
     last_sequence: int | None = None
@@ -78,8 +80,17 @@ class FrameFanout:
             if queue.full():
                 queue.get_nowait()
                 metric.dropped += 1
+                if (
+                    queue is self.queues[frame.source]
+                    and frame.source not in self._primary_claimed
+                ):
+                    metric.idle_queue_drops += 1
+                else:
+                    metric.active_subscriber_drops += 1
                 delivered = replace(
-                    frame, flags=frame.flags | FrameFlags.DISCONTINUITY
+                    frame,
+                    flags=frame.flags | FrameFlags.DISCONTINUITY,
+                    subscriber_overrun=True,
                 )
             queue.put_nowait(delivered)
 
