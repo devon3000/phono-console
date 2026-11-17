@@ -9,7 +9,8 @@ User=phono-console
 Group=phono-console
 SupplementaryGroups=audio
 EnvironmentFile=/etc/phono-console/player.env
-ExecStart=/opt/phono-console/current/player-venv/bin/sendspin daemon \
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/phono-console/current/player-venv/bin/python /opt/phono-console/current/bin/sendspin-player.py daemon \
   --url ${PHONO_PLAYER_URL} \
   --name ${PHONO_PLAYER_NAME} \
   --id phono-console \

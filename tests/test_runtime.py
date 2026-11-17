@@ -6,6 +6,7 @@ from phono_console.config import load_config
 from phono_console.runtime import (
     distribution_needs_start,
     local_loopback_command,
+    ma_loopback_command,
     system_info,
 )
 
@@ -26,6 +27,17 @@ def test_system_info_has_dashboard_network_shape() -> None:
     info = system_info()
     assert isinstance(info["hostname"], str)
     assert isinstance(info["addresses"], list)
+
+
+def test_ma_loopback_profiling_does_not_change_audio_timing() -> None:
+    config = load_config(
+        Path(__file__).parents[1] / "config" / "phono-console.example.toml"
+    )
+    command = ma_loopback_command(config)
+    assert "--xrun" in command
+    assert command[command.index("-t") + 1] == "40000"
+    assert command[command.index("-C") + 1] == "console_ma_capture"
+    assert command[command.index("-P") + 1] == config.audio.playback_device
 
 
 def test_distribution_restarts_when_group_stopped_but_source_request_is_stale() -> None:

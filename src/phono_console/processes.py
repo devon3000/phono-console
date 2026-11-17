@@ -66,6 +66,10 @@ class ManagedProcess:
         return self._process is not None and self._process.returncode is None
 
     @property
+    def pid(self) -> int | None:
+        return getattr(self._process, "pid", None) if self.running else None
+
+    @property
     def health(self) -> dict[str, object]:
         return {
             "status": "ok" if self.running else "failed",

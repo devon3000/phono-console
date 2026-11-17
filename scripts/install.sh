@@ -174,6 +174,8 @@ install -m 0755 \
 install -d -m 0755 "$release_dir/bin"
 install -m 0755 "$SOURCE_DIR/scripts/cec-volume-hook.sh" \
   "$release_dir/bin/cec-volume-hook"
+install -m 0644 "$SOURCE_DIR/scripts/sendspin-player.py" \
+  "$release_dir/bin/sendspin-player.py"
 
 # The sendspin player pins aiosendspin 6.x while the routing daemon's source
 # client needs 9.x, so the player lives in its own venv.

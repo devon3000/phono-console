@@ -30,6 +30,7 @@ from .event_sinks import CompositeEventSink
 from .events import LoggingEventSink
 from .ma import MusicAssistantState
 from .processes import ManagedProcess, ProcessSpec, SubprocessLauncher
+from .playback_diagnostics import PlaybackDiagnostics
 from .router import ProcessAudioRouter
 from .policy import OutputTarget, PhonoOutputMode, Route, RoutingPhase, Source
 from .sendspin_source import SendspinSourcePublisher
@@ -100,7 +101,7 @@ def bluetooth_loopback_command(config: Config) -> tuple[str, ...]:
 def ma_loopback_command(config: Config) -> tuple[str, ...]:
     audio = config.audio
     return (
-        "alsaloop", "-C", "console_ma_capture",
+        "alsaloop", "--xrun", "-C", "console_ma_capture",
         "-P", audio.playback_device, "-f", "S16_LE",
         "-r", str(audio.sample_rate), "-c", str(audio.channels),
         "-t", str(audio.target_latency_ms * 1000),
@@ -752,6 +753,7 @@ async def run_daemon(config: Config) -> None:
             controller.run(stop),
             bluetooth_manager.run(stop),
             hardware_controls.run(stop),
+            PlaybackDiagnostics(state, ma_loopback, events).run(stop),
         ]
         if timestamped_bluetooth is not None:
             tasks.append(timestamped_bluetooth.run(stop, state))
