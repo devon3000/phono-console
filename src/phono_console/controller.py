@@ -51,7 +51,7 @@ class Controller:
         status_sink: StatusSink | None = None,
         bluetooth_monitor: LevelMonitor | None = None,
         bluetooth_is_playing: Callable[[], bool] | None = None,
-        distribution_available: Callable[[], bool | Awaitable[bool]] | None = None,
+        distribution_available: Callable[[Source], bool | Awaitable[bool]] | None = None,
         distribution_capable: Callable[
             [Source], bool | Awaitable[bool]
         ] | None = None,
@@ -107,10 +107,10 @@ class Controller:
         self._distribution_pending_since: float | None = None
         self._last_reported_phono_activity: bool | None = None
 
-    async def _distribution_ready(self, now: float) -> bool:
+    async def _distribution_ready(self, now: float, source: Source) -> bool:
         if self.distribution_available is None:
             return False
-        result = self.distribution_available()
+        result = self.distribution_available(source)
         healthy = await result if hasattr(result, "__await__") else bool(result)
         if not healthy:
             self._distribution_healthy_since = None
@@ -329,7 +329,6 @@ class Controller:
                 "ok",
                 "monitoring paused while phono is active",
             )
-        available = await self._distribution_ready(timestamp)
         selected_source = (
             Source.PHONO
             if phono_signal_present
@@ -339,6 +338,9 @@ class Controller:
                 else (Source.PHONO if phono_active else Source.NONE)
             )
         )
+        # Readiness must validate the source selected in this tick, not infer
+        # priority again from the previous status's detector release latches.
+        available = await self._distribution_ready(timestamp, selected_source)
         distribution_required = bool(
             selected_source in {Source.PHONO, Source.BLUETOOTH}
             and output_mode is PhonoOutputMode.DOWNSTAIRS
@@ -456,7 +458,7 @@ class Controller:
         if (
             self.route is Route.DISTRIBUTED_BLUETOOTH
             and bluetooth_active
-            and not phono_active
+            and selected_source is Source.BLUETOOTH
             # Preserve the return loop only through a transient MA telemetry
             # gap.  An explicit switch to Local Only makes distribution
             # incapable and must be allowed to move Bluetooth back to the

@@ -118,6 +118,44 @@ def distribution_needs_start(
     return not stream_requested or not console_playing
 
 
+def distribution_is_ready(
+    state: StateStore,
+    source: Source,
+    *,
+    publisher_present: bool,
+    stream_healthy: bool,
+    console_playing: bool,
+    target_playing: bool,
+    phono_stop_pending: bool = False,
+) -> bool:
+    """Confirm the current source's MA return, never detector release state."""
+    if (
+        source is Source.NONE
+        or state.output_target is not OutputTarget.DOWNSTAIRS
+        or not publisher_present
+        or state.routing_session_generation != state.routing_generation
+        or state.routing_session_source is not source
+    ):
+        return False
+    if (
+        source is Source.PHONO
+        and phono_stop_pending
+        and state.status is not None
+        and state.status.route is Route.DISTRIBUTED_PHONO
+    ):
+        return True
+    return bool(
+        state.sendspin_source.get("connected")
+        and state.sendspin_source.get("stream_requested")
+        and state.sendspin_source.get("streaming")
+        and state.sendspin_source.get("selected_source") == source.value
+        and stream_healthy
+        and state.music_assistant.get("connected")
+        and console_playing
+        and target_playing
+    )
+
+
 async def run_daemon(config: Config) -> None:
     state = StateStore()
     output_target_path = Path(config.sendspin.state_dir) / "output-target"
@@ -340,44 +378,17 @@ async def run_daemon(config: Config) -> None:
         )
     )
 
-    def distribution_available() -> bool:
-        active_source = (
-            Source.PHONO
-            if state.status is not None and state.status.phono_active
-            else (
-                Source.BLUETOOTH
-                if state.status is not None and state.status.bluetooth_active
-                else Source.NONE
-            )
-        )
-        phono_stop_grace = bool(
-            state.output_target is OutputTarget.DOWNSTAIRS
-            and publisher is not None
-            and publisher.phono_stop_pending
-            and state.status is not None
-            and state.status.route is Route.DISTRIBUTED_PHONO
-            and state.routing_session_generation == state.routing_generation
-        )
-        return bool(
-            phono_stop_grace
-            or (
-                state.output_target is OutputTarget.DOWNSTAIRS
-                and publisher is not None
-                and state.sendspin_source.get("connected")
-                and state.sendspin_source.get("stream_requested")
-                and state.sendspin_source.get("streaming")
-                and state.sendspin_source.get("selected_source")
-                == active_source.value
-                and publisher.stream_healthy
-                and state.music_assistant.get("connected")
-                and music_assistant.console_playing
-                and music_assistant.player_is_playing(
-                    config.routing.distribution_target
-                )
-                and state.routing_session_generation
-                == state.routing_generation
-                and state.routing_session_source is active_source
-            )
+    def distribution_available(source: Source) -> bool:
+        return distribution_is_ready(
+            state,
+            source,
+            publisher_present=publisher is not None,
+            stream_healthy=bool(publisher and publisher.stream_healthy),
+            phono_stop_pending=bool(publisher and publisher.phono_stop_pending),
+            console_playing=music_assistant.console_playing,
+            target_playing=music_assistant.player_is_playing(
+                config.routing.distribution_target
+            ),
         )
 
     def distribution_capable(source: Source) -> bool:

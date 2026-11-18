@@ -833,7 +833,7 @@ def test_controller_restarts_downstairs_after_failed_source_and_server_stop() ->
             settings, SimulatedLevelMonitor(), SimulatedMusicAssistant(),
             SimulatedAudioRouter(), events,
             bluetooth_monitor=SimulatedLevelMonitor(level=-20.0),
-            distribution_available=lambda: publisher.stream_healthy,
+            distribution_available=lambda source: publisher.stream_healthy,
             # Same source-request/health gate used by runtime.
             distribution_capable=lambda _source: (
                 not state.sendspin_source.get("stream_requested")

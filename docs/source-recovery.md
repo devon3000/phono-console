@@ -32,6 +32,28 @@ the normal MA session-start path owns synchronized distribution recovery.
 
 ## Diagnostics
 
+### Phono-to-Bluetooth handoff
+
+The November 17 capture showed `local_bluetooth` / `starting_distribution`
+despite MA playing, a healthy Bluetooth source session, and Downstairs requested.
+The cabinet's MA-return loopback was absent: the audible offset in this capture
+was direct local playback alongside MA's delayed distribution, not player clock
+drift. Phono was quiet at about -69 dBFS but its long release latch remained true.
+
+Runtime readiness had independently chosen phono from that release latch while
+the controller correctly selected Bluetooth from current activity. Readiness now
+receives the controller's current-tick source explicitly. Source identity,
+session generation, stream health, and both MA playback confirmations remain
+required. The existing short Bluetooth telemetry-gap protection also uses this
+selection, so a quiet phono release latch cannot disable it and reopen the return
+loopback. Actual renewed phono signal retains priority.
+
+This fixes the reproduced handoff/fallback mismatch. The separate earlier MA
+"no audio for 60s" event is not explained by this readiness defect; no capture
+or Sendspin timing parameters are changed by this fix.
+
+### PCM discontinuities
+
 - `sendspin_source_discontinuity` records source, sequence, epoch, timestamp,
   flags, already-published sample count, and subscriber-overrun provenance.
 - `active_subscriber_drops` counts queue evictions affecting subscribed consumers.

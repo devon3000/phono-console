@@ -5,7 +5,8 @@ from pathlib import Path
 from phono_console.config import load_config
 from phono_console.controller import Controller
 from phono_console.levels import ChannelLevel, LevelSession, StereoLevel
-from phono_console.policy import PhonoOutputMode, Route
+from phono_console.policy import OutputTarget, PhonoOutputMode, Route, Source
+from phono_console.runtime import distribution_is_ready
 from phono_console.state import StateStore
 from phono_console.simulation import (
     SimulatedAudioRouter,
@@ -396,7 +397,7 @@ def test_requested_distribution_is_prepared_immediately() -> None:
             SimulatedMusicAssistant(),
             router,
             SimulatedEventSink(),
-            distribution_available=lambda: True,
+            distribution_available=lambda source: True,
             prepare_distribution=prepare,
             phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
         )
@@ -432,6 +433,71 @@ def test_bluetooth_preempts_phono_release_hold_during_actual_silence() -> None:
         await subject.tick(now=1.25)
         assert subject.detector.active
         assert subject.route is Route.LOCAL_BLUETOOTH
+
+    asyncio.run(scenario())
+
+
+def test_downstairs_handoff_confirms_bluetooth_while_phono_is_still_latched() -> None:
+    async def scenario() -> None:
+        phono = SimulatedLevelMonitor(level=-20.0)
+        bluetooth = SimulatedLevelMonitor(level=-120.0)
+        state = StateStore()
+        state.output_target = OutputTarget.DOWNSTAIRS
+        state.music_assistant = {"connected": True}
+        checked = []
+        target_playing = True
+
+        def ready(source):
+            checked.append(source)
+            return distribution_is_ready(
+                state, source, publisher_present=True, stream_healthy=True,
+                console_playing=True, target_playing=target_playing,
+            )
+
+        async def prepare(source):
+            state.sendspin_source = dict(
+                connected=True, stream_requested=True, streaming=True,
+                selected_source=source.value,
+            )
+            return True
+
+        subject = Controller(
+            config(), phono, SimulatedMusicAssistant(), SimulatedAudioRouter(),
+            SimulatedEventSink(), status_sink=state,
+            bluetooth_monitor=bluetooth,
+            distribution_available=ready,
+            distribution_capable=lambda source: source is not Source.NONE,
+            distribution_stream_healthy=lambda: True,
+            prepare_distribution=prepare,
+            phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
+        )
+        await subject.tick(now=0)
+        await subject.tick(now=0.25)
+        assert subject.route is Route.DISTRIBUTED_PHONO
+        phono.level = -69.0
+        bluetooth.level = -20.0
+        await subject.tick(now=1)
+        await subject.tick(now=1.25)
+        # The current selection must reach readiness even before the next
+        # dashboard status is published. A phono release hold is not priority.
+        assert checked[-1] is Source.BLUETOOTH
+        for now in (1.5, 2, 3):
+            status = await subject.tick(now=now)
+        assert status.phono_active
+        assert status.bluetooth_active
+        assert status.route is Route.DISTRIBUTED_BLUETOOTH
+        assert state.routing_session_source is Source.BLUETOOTH
+        # A telemetry blip must not reopen the cabinet return simply because
+        # the quiet phono detector still has time left on its release hold.
+        target_playing = False
+        status = await subject.tick(now=3.25)
+        assert status.route is Route.DISTRIBUTED_BLUETOOTH
+        target_playing = True
+        # Genuine renewed phono signal still has priority over Bluetooth.
+        phono.level = -20.0
+        await subject.tick(now=4)
+        status = await subject.tick(now=4.25)
+        assert status.route is Route.DISTRIBUTED_PHONO
 
     asyncio.run(scenario())
 
@@ -485,7 +551,7 @@ def test_phono_inherits_distributed_bluetooth_output_path() -> None:
             SimulatedAudioRouter(),
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
-            distribution_available=lambda: True,
+            distribution_available=lambda source: True,
             distribution_capable=lambda _source: True,
             prepare_distribution=prepare,
             phono_output_mode=lambda: output_mode,
@@ -558,7 +624,7 @@ def test_distribution_is_released_when_source_signal_ends() -> None:
             SimulatedMusicAssistant(),
             SimulatedAudioRouter(),
             SimulatedEventSink(),
-            distribution_available=lambda: distribution_requested,
+            distribution_available=lambda source: distribution_requested,
             prepare_distribution=prepare,
             release_distribution=release,
             phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
@@ -601,7 +667,7 @@ def test_distributed_bluetooth_releases_after_detector_hold() -> None:
             router,
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
-            distribution_available=lambda: True,
+            distribution_available=lambda source: True,
             prepare_distribution=prepare,
             release_distribution=release,
             phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
@@ -649,7 +715,7 @@ def test_bluetooth_call_waits_for_pcm_and_phone_resume_before_restarting() -> No
             SimulatedAudioRouter(), SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
             bluetooth_is_playing=lambda: playing,
-            distribution_available=lambda: ready,
+            distribution_available=lambda source: ready,
             distribution_capable=lambda _source: True,
             distribution_stream_healthy=lambda: ready,
             prepare_distribution=prepare,
@@ -696,7 +762,7 @@ def test_distributed_bluetooth_survives_transient_ma_unavailability() -> None:
             router,
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
-            distribution_available=lambda: ready,
+            distribution_available=lambda source: ready,
             distribution_capable=lambda _source: True,
             distribution_stream_healthy=lambda: True,
             prepare_distribution=prepare,
@@ -760,7 +826,7 @@ def test_distributed_bluetooth_releases_when_distribution_is_disabled() -> None:
             router,
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
-            distribution_available=lambda: ready,
+            distribution_available=lambda source: ready,
             distribution_capable=lambda _source: capable,
             prepare_distribution=prepare,
             release_distribution=release,
@@ -803,7 +869,7 @@ def test_distributed_bluetooth_falls_back_when_source_stream_stalls() -> None:
             router,
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
-            distribution_available=lambda: ready,
+            distribution_available=lambda source: ready,
             distribution_capable=lambda _source: stream_healthy,
             distribution_stream_healthy=lambda: stream_healthy,
             prepare_distribution=lambda _source: asyncio.sleep(0, result=True),
@@ -846,7 +912,7 @@ def test_timestamped_distribution_waits_silently_then_switches_to_ma() -> None:
             router,
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
-            distribution_available=lambda: ready,
+            distribution_available=lambda source: ready,
             distribution_capable=lambda source: source.value == "bluetooth",
             prepare_distribution=prepare,
             phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
@@ -878,7 +944,7 @@ def test_timestamped_distribution_falls_back_locally_after_timeout() -> None:
             SimulatedAudioRouter(),
             SimulatedEventSink(),
             bluetooth_monitor=bluetooth,
-            distribution_available=lambda: False,
+            distribution_available=lambda source: False,
             distribution_capable=lambda _source: True,
             prepare_distribution=lambda _source: asyncio.sleep(0, result=False),
             phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
@@ -909,7 +975,7 @@ def test_requested_phono_distribution_keeps_local_audio_until_ma_is_ready() -> N
             SimulatedMusicAssistant(),
             router,
             SimulatedEventSink(),
-            distribution_available=lambda: False,
+            distribution_available=lambda source: False,
             distribution_capable=lambda _source: True,
             prepare_distribution=prepare,
             phono_output_mode=lambda: PhonoOutputMode.DOWNSTAIRS,
