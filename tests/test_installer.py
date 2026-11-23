@@ -97,6 +97,17 @@ def test_lgpio_comes_from_raspberry_pi_os_not_pypi() -> None:
     assert '"lgpio>=' not in project
 
 
+def test_player_recovery_is_version_pinned_and_checked_before_activation():
+    installer = (ROOT / "scripts/install.sh").read_text()
+    assert 'pip" install "sendspin==7.5.0"' in installer
+    assert '"$SOURCE_DIR/scripts/sendspin_recovery.py"' in installer
+    check = 'from sendspin_recovery import install_recovery_patch; install_recovery_patch()'
+    assert check in installer
+    assert installer.index(check) < installer.index('"$APP_DIR/current"')
+    wrapper = (ROOT / "scripts/sendspin-player.py").read_text()
+    assert wrapper.index("install_recovery_patch()") < wrapper.index("command.load()()")
+
+
 def test_reconfiguration_preserves_existing_music_assistant_defaults() -> None:
     installer = (ROOT / "scripts" / "install.sh").read_text()
     assert 'existing_ma_url="$(config_value music_assistant base_url)"' in installer

@@ -3,6 +3,7 @@ import importlib.util
 import logging
 from pathlib import Path
 import queue
+import sys
 from types import SimpleNamespace
 
 from phono_console.playback_diagnostics import PlaybackDiagnostics, alsa_snapshot
@@ -102,9 +103,12 @@ def test_player_still_runs_if_diagnostic_storage_is_unavailable(tmp_path):
 def test_player_wrapper_preserves_entrypoint_and_cleans_up(monkeypatch):
     wrapper = player_wrapper()
     actions = []
+    monkeypatch.setitem(sys.modules, "sendspin_recovery", SimpleNamespace(
+        install_recovery_patch=lambda: actions.append("recovery"),
+    ))
     monkeypatch.setattr(wrapper, "configure_diagnostics", lambda: lambda: actions.append("closed"))
     monkeypatch.setattr(wrapper, "entry_points", lambda **kwargs: [SimpleNamespace(
         load=lambda: lambda: actions.append("player") or 7,
     )])
     assert wrapper.main() == 7
-    assert actions == ["player", "closed"]
+    assert actions == ["recovery", "player", "closed"]

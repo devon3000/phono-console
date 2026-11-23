@@ -81,6 +81,8 @@ def main():
     close = configure_diagnostics()
     atexit.register(close)
     try:
+        from sendspin_recovery import install_recovery_patch
+        install_recovery_patch()
         command = next(iter(entry_points(group="console_scripts", name="sendspin")))
         return command.load()()
     finally:

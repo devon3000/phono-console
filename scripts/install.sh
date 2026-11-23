@@ -176,12 +176,18 @@ install -m 0755 "$SOURCE_DIR/scripts/cec-volume-hook.sh" \
   "$release_dir/bin/cec-volume-hook"
 install -m 0644 "$SOURCE_DIR/scripts/sendspin-player.py" \
   "$release_dir/bin/sendspin-player.py"
+install -m 0644 "$SOURCE_DIR/scripts/sendspin_recovery.py" \
+  "$release_dir/bin/sendspin_recovery.py"
 
 # The sendspin player pins aiosendspin 6.x while the routing daemon's source
 # client needs 9.x, so the player lives in its own venv.
 python3 -m venv "$release_dir/player-venv"
 "$release_dir/player-venv/bin/pip" install --upgrade pip
-"$release_dir/player-venv/bin/pip" install "sendspin>=7.5,<8"
+"$release_dir/player-venv/bin/pip" install "sendspin==7.5.0"
+# Fail before activating a release if the upstream implementation no longer
+# matches the narrowly scoped recovery fix.
+PYTHONPATH="$release_dir/bin" "$release_dir/player-venv/bin/python" -c \
+  'from sendspin_recovery import install_recovery_patch; install_recovery_patch()'
 
 keep_existing=false
 existing_ma_url=""
