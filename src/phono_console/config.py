@@ -96,8 +96,10 @@ class AmplifierConfig:
     wake_on_audio: bool = True
     physical_address: str = "1.0.0.0"
     wake_settle_seconds: float = 0.0
-    volume_min: int = 15
-    volume_max: int = 45
+    volume_min: int = 12
+    volume_max: int = 40
+    volume_mid: int | None = 20
+    volume_mid_position: int = 60
     local_phono_volume: int = 50
 
 
@@ -260,8 +262,15 @@ def load_config(path: Path) -> Config:
             wake_on_audio=bool(amplifier.get("wake_on_audio", True)),
             physical_address=str(amplifier.get("physical_address", "1.0.0.0")),
             wake_settle_seconds=float(amplifier.get("wake_settle_seconds", 0.0)),
-            volume_min=int(amplifier.get("volume_min", 15)),
-            volume_max=int(amplifier.get("volume_max", 45)),
+            volume_min=int(amplifier.get("volume_min", 12)),
+            volume_max=int(amplifier.get("volume_max", 40)),
+            # Preserve existing explicit two-point configurations as linear.
+            volume_mid=(
+                int(amplifier["volume_mid"]) if "volume_mid" in amplifier
+                else None if "volume_min" in amplifier or "volume_max" in amplifier
+                else 20
+            ),
+            volume_mid_position=int(amplifier.get("volume_mid_position", 60)),
             local_phono_volume=int(amplifier.get("local_phono_volume", 50)),
         ),
         controls=ControlsConfig(
@@ -364,6 +373,12 @@ def _validate(config: Config) -> None:
         raise ValueError(
             "amplifier volume range must satisfy 0 <= volume_min < volume_max <= 100"
         )
+    if config.amplifier.volume_mid is not None and not (
+        config.amplifier.volume_min < config.amplifier.volume_mid
+        < config.amplifier.volume_max
+        and 1 < config.amplifier.volume_mid_position < 100
+    ):
+        raise ValueError("amplifier volume midpoint must lie inside both ranges")
     if not 0 <= config.amplifier.local_phono_volume <= 100:
         raise ValueError("amplifier.local_phono_volume must be between 0 and 100")
     control_pins = (

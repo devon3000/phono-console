@@ -379,8 +379,10 @@ logical_address = 5
 wake_on_audio = true
 physical_address = "1.0.0.0"
 wake_settle_seconds = 0.0
-volume_min = 15
-volume_max = 45
+volume_min = 12
+volume_mid = 20
+volume_mid_position = 60
+volume_max = 40
 local_phono_volume = 50
 
 [controls]
@@ -504,8 +506,10 @@ logical_address = 5
 wake_on_audio = true
 physical_address = "1.0.0.0"
 wake_settle_seconds = 0.0
-volume_min = 15
-volume_max = 45
+volume_min = 12
+volume_mid = 20
+volume_mid_position = 60
+volume_max = 40
 local_phono_volume = 50
 EOF
 fi

@@ -761,6 +761,7 @@ async def run_daemon(config: Config) -> None:
     )
     try:
         tasks = [
+            amplifier.run(stop),
             controller.run(stop),
             bluetooth_manager.run(stop),
             hardware_controls.run(stop),

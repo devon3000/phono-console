@@ -22,6 +22,14 @@ def physical_address_bytes(address: str) -> tuple[int, int]:
 def logical_to_cec(config: AmplifierConfig, volume: int) -> int:
     """Map a Music Assistant 1-100 volume onto the safe amplifier range."""
     logical = max(1, min(100, int(volume)))
+    if config.volume_mid is not None:
+        if logical <= config.volume_mid_position:
+            return round(config.volume_min + (logical - 1)
+                         * (config.volume_mid - config.volume_min)
+                         / (config.volume_mid_position - 1))
+        return round(config.volume_mid + (logical - config.volume_mid_position)
+                     * (config.volume_max - config.volume_mid)
+                     / (100 - config.volume_mid_position))
     span = config.volume_max - config.volume_min
     return round(config.volume_min + ((logical - 1) * span / 99))
 
@@ -29,6 +37,14 @@ def logical_to_cec(config: AmplifierConfig, volume: int) -> int:
 def cec_to_logical(config: AmplifierConfig, volume: int) -> int:
     """Map a reported amplifier volume back onto Music Assistant's scale."""
     cec = max(config.volume_min, min(config.volume_max, int(volume)))
+    if config.volume_mid is not None:
+        if cec <= config.volume_mid:
+            return round(1 + (cec - config.volume_min)
+                         * (config.volume_mid_position - 1)
+                         / (config.volume_mid - config.volume_min))
+        return round(config.volume_mid_position + (cec - config.volume_mid)
+                     * (100 - config.volume_mid_position)
+                     / (config.volume_max - config.volume_mid))
     span = config.volume_max - config.volume_min
     return round(1 + ((cec - config.volume_min) * 99 / span))
 
@@ -44,10 +60,16 @@ class CecAmplifier:
         self.state = state
         self._lock = asyncio.Lock()
         self._process: asyncio.subprocess.Process | None = None
+        self._reader_task: asyncio.Task | None = None
+        self._reports: dict[str, asyncio.Queue] = {
+            "71": asyncio.Queue(maxsize=1),
+            "8f": asyncio.Queue(maxsize=1),
+        }
 
     async def _open(self) -> asyncio.subprocess.Process:
         if self._process is not None and self._process.returncode is None:
             return self._process
+        await self._stop_reader()
         self._process = await asyncio.create_subprocess_exec(
             "cec-client",
             "-d",
@@ -57,7 +79,45 @@ class CecAmplifier:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
+        for queue in self._reports.values():
+            while not queue.empty():
+                queue.get_nowait()
+        self._reader_task = asyncio.create_task(self._read_reports(self._process))
         return self._process
+
+    async def _read_reports(self, process: asyncio.subprocess.Process) -> None:
+        """Continuously drain CEC stdout, including unsolicited remote reports."""
+        assert process.stdout is not None
+        try:
+            while line := await process.stdout.readline():
+                text = line.decode(errors="replace")
+                for opcode, pattern in (("71", _AUDIO_STATUS), ("8f", _POWER_STATUS)):
+                    match = pattern.search(text)
+                    if not match:
+                        continue
+                    value = int(match.group(1), 16)
+                    if opcode == "71" and (value & 0x7F) != 0x7F:
+                        await self._publish_audio(value)
+                    queue = self._reports[opcode]
+                    if queue.full():
+                        queue.get_nowait()
+                    queue.put_nowait(value)
+        finally:
+            for queue in self._reports.values():
+                if queue.full():
+                    queue.get_nowait()
+                queue.put_nowait(RuntimeError("CEC client ended before the amplifier replied"))
+
+    async def _publish_audio(self, status: int) -> tuple[int, bool]:
+        volume, muted = status & 0x7F, bool(status & 0x80)
+        if volume == 0x7F:
+            raise RuntimeError("CEC reported unknown volume")
+        logical = 0 if muted else cec_to_logical(self.config, volume)
+        # Retain power telemetry; an audio status report alone is not power-on.
+        previous = self.state.components.get("amplifier", {})
+        power = {key: previous[key] for key in ("powered", "awakened") if key in previous}
+        await self._publish(volume=logical, cec_volume=volume, muted=muted, **power)
+        return logical, muted
 
     async def start(self) -> None:
         """Prewarm the persistent CEC session before audio is detected."""
@@ -72,35 +132,71 @@ class CecAmplifier:
             process, self._process = self._process, None
             if process is not None:
                 await self._close(process)
+            await self._stop_reader()
+
+    async def _stop_reader(self) -> None:
+        task, self._reader_task = self._reader_task, None
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
     async def _invalidate(self, process: asyncio.subprocess.Process) -> None:
         if self._process is process:
             self._process = None
         await self._close(process)
+        await self._stop_reader()
 
-    @staticmethod
-    async def _send(process: asyncio.subprocess.Process, command: str) -> None:
+    async def _send(self, process: asyncio.subprocess.Process, command: str) -> None:
+        opcode = command.rsplit(":", 1)[-1]
+        if opcode in self._reports:
+            queue = self._reports[opcode]
+            while not queue.empty():
+                queue.get_nowait()
         assert process.stdin is not None
         process.stdin.write(f"{command}\n".encode())
         await process.stdin.drain()
 
-    @staticmethod
     async def _read_match(
+        self,
         process: asyncio.subprocess.Process,
         pattern: re.Pattern[str],
         timeout: float = 3.0,
     ) -> int:
-        assert process.stdout is not None
-
-        async def read() -> int:
-            while line := await process.stdout.readline():
-                match = pattern.search(line.decode(errors="replace"))
-                if match:
-                    return int(match.group(1), 16)
-            raise RuntimeError("CEC client ended before the amplifier replied")
-
         async with asyncio.timeout(timeout):
-            return await read()
+            result = await self._reports["71" if pattern is _AUDIO_STATUS else "8f"].get()
+            if isinstance(result, Exception):
+                raise result
+            if pattern is _AUDIO_STATUS and (result & 0x7F) == 0x7F:
+                raise RuntimeError("CEC reported unknown volume")
+            return result
+
+    async def run(self, stop: asyncio.Event) -> None:
+        """Read-only refresh; never wake, unmute, or restore a volume."""
+        if not self.config.enabled:
+            return
+        while not stop.is_set():
+            # Do not queue a background refresh behind a wake/volume command.
+            if not self._lock.locked():
+                async with self._lock:
+                    try:
+                        process = await self._open()
+                        await self._send(process, f"tx 1{self.config.logical_address:x}:8f")
+                        powered = await self._read_match(process, _POWER_STATUS)
+                        previous = self.state.components.get("amplifier", {})
+                        values = {key: previous[key] for key in ("volume", "cec_volume", "muted") if key in previous}
+                        await self._publish(powered=powered == 0, **values)
+                        if powered == 0:
+                            await self._send(process, f"tx 1{self.config.logical_address:x}:71")
+                            await self._read_match(process, _AUDIO_STATUS)
+                    except Exception as exc:
+                        await self.state.set_component("amplifier", "degraded", str(exc), enabled=True)
+                        if self._process is not None:
+                            await self._invalidate(self._process)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                pass
 
     @staticmethod
     async def _close(process: asyncio.subprocess.Process) -> None:

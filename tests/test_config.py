@@ -1,6 +1,16 @@
 from pathlib import Path
 
+import pytest
+
 from phono_console.config import load_config
+
+
+def write_amplifier_config(path, settings):
+    example = Path(__file__).parents[1] / "config" / "phono-console.example.toml"
+    text = example.read_text()
+    before, rest = text.split("[amplifier]", 1)
+    _, after = rest.split("[controls]", 1)
+    path.write_text(before + "[amplifier]\n" + settings + "\n[controls]" + after)
 
 
 def test_example_configuration_loads() -> None:
@@ -26,3 +36,29 @@ def test_example_configuration_loads() -> None:
     assert config.controls.encoder_b_gpio == 27
     assert config.controls.encoder_button_gpio == 22
     assert config.controls.volume_step == 2
+
+
+def test_missing_amplifier_bounds_use_measured_curve(tmp_path):
+    path = tmp_path / "config.toml"
+    write_amplifier_config(path, 'enabled = true')
+    amp = load_config(path).amplifier
+    assert (amp.volume_min, amp.volume_mid, amp.volume_max, amp.volume_mid_position) == (12, 20, 40, 60)
+
+
+def test_explicit_legacy_bounds_remain_linear(tmp_path):
+    path = tmp_path / "config.toml"
+    write_amplifier_config(path, 'volume_min = 15\nvolume_max = 45')
+    amp = load_config(path).amplifier
+    assert amp.volume_mid is None
+    assert (amp.volume_min, amp.volume_max) == (15, 45)
+
+
+@pytest.mark.parametrize("settings", [
+    'volume_mid = 12', 'volume_mid = 40', 'volume_mid_position = 1',
+    'volume_mid_position = 100',
+])
+def test_invalid_amplifier_calibration_is_rejected(tmp_path, settings):
+    path = tmp_path / "config.toml"
+    write_amplifier_config(path, settings)
+    with pytest.raises(ValueError, match="midpoint"):
+        load_config(path)
