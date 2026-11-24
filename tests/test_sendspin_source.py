@@ -765,9 +765,8 @@ def test_server_stop_after_capture_failure_publishes_restartable_state(
         failed_task = publisher._stream_task
         assert failed_task is not None
         await failed_task
-        assert state.sendspin_source["stream_requested"] is True
+        assert state.sendspin_source["stream_requested"] is False
         assert state.sendspin_source["streaming"] is False
-        assert publisher._stream_retry_task is not None
         assert len(client.captures[0].fed) == 1
         discontinuities = [
             payload for name, payload in events.events
@@ -778,11 +777,9 @@ def test_server_stop_after_capture_failure_publishes_restartable_state(
         assert discontinuities[0]["epoch"] == 1
         assert discontinuities[0]["sequence"] == 2
 
-        # MA ends the failed session before the delayed retry. The controller
-        # must see that a new session can be requested, not a stale request
-        # for an unhealthy stream that permanently blocks distribution_capable.
+        # No local timer may reopen an ended server input. MA can acknowledge
+        # the stop and then authorize a fresh session.
         await publisher._handle_server_command("stop")
-        assert publisher._stream_retry_task is None
         assert state.sendspin_source["stream_requested"] is False
         assert state.sendspin_source["error"] is None
 
@@ -849,6 +846,7 @@ def test_controller_restarts_downstairs_after_failed_source_and_server_stop() ->
         assert subject.route is Route.DISTRIBUTED_BLUETOOTH
         fail_capture.set()
         await failed_task
+        publisher._pcm_stream_factory = endless_pcm
         await subject.tick(now=2)
         assert subject.route is Route.LOCAL_BLUETOOTH
 
@@ -860,12 +858,11 @@ def test_controller_restarts_downstairs_after_failed_source_and_server_stop() ->
         assert len(client.captures) == 2
         await publisher.set_distribution_enabled(False)
         assert publisher._stream_task is None
-        assert publisher._stream_retry_task is None
 
     asyncio.run(scenario())
 
 
-def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
+def test_capture_eof_requires_a_fresh_server_start() -> None:
     async def scenario() -> None:
         client = FakeClient()
         publisher, events, state = make_publisher(client)
@@ -874,6 +871,12 @@ def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
         run = asyncio.create_task(publisher.run(stop))
         await asyncio.sleep(0.03)
 
+        client.command("start")
+        await asyncio.sleep(0.05)
+        assert len(client.captures) == 1
+        assert state.sendspin_source["stream_requested"] is False
+        assert state.sendspin_source["streaming"] is False
+        publisher._pcm_stream_factory = endless_pcm
         client.command("start")
         deadline = asyncio.get_running_loop().time() + 0.5
         while len(client.captures) < 2:
@@ -890,6 +893,76 @@ def test_capture_eof_clears_state_and_restarts_while_requested() -> None:
         assert publisher._stream_task is None
         assert state.sendspin_source["streaming"] is False
 
+    asyncio.run(scenario())
+
+
+def test_source_handoff_does_not_reuse_the_previous_start_admission():
+    async def scenario():
+        client = FakeClient()
+        publisher, _, state = make_publisher(client)
+        publisher._client = client
+        publisher._connected = True
+        publisher._source_devices[Source.BLUETOOTH] = "bluetooth"
+        publisher._source_distribution_enabled[Source.BLUETOOTH] = True
+        await publisher._handle_server_command("start")
+        await asyncio.sleep(0)
+        await publisher.select_source(Source.BLUETOOTH)
+        assert len(client.captures) == 1
+        assert client.captures[0].stopped
+        assert state.sendspin_source["stream_requested"] is False
+        await publisher._handle_server_command("start")
+        await asyncio.sleep(0)
+        assert len(client.captures) == 2
+        await publisher._stop_streaming()
+    asyncio.run(scenario())
+
+
+def test_old_connection_commands_are_ignored_after_reconnect():
+    async def scenario():
+        client = FakeClient()
+        publisher, _, _ = make_publisher(client)
+        stop = asyncio.Event()
+        run = asyncio.create_task(publisher.run(stop))
+        await asyncio.sleep(0.03)
+        old_callback = client.command_listeners[0]
+        client.disconnect_listeners[0]()
+        await asyncio.sleep(0.04)
+        assert len(client.connected_urls) >= 2
+        old_callback(FakeServerCommand(FakeSourceCommand("start")))
+        await asyncio.sleep(0.01)
+        assert client.captures == []
+        client.command("start")
+        await asyncio.sleep(0.01)
+        assert len(client.captures) == 1
+        # A delayed old stop must not stop the new, admitted capture either.
+        old_callback(FakeServerCommand(FakeSourceCommand("stop")))
+        await asyncio.sleep(0.01)
+        assert publisher._streaming
+        stop.set()
+        await asyncio.wait_for(run, timeout=1)
+    asyncio.run(scenario())
+
+
+def test_cancelled_feed_response_revokes_capture_admission():
+    async def scenario():
+        class CancelledCapture(FakeCapture):
+            async def feed(self, *args, **kwargs):
+                future = asyncio.get_running_loop().create_future()
+                future.cancel()
+                await future
+        client = FakeClient()
+        capture = CancelledCapture()
+        client.create_source_capture = lambda fmt: capture
+        publisher, _, state = make_publisher(client)
+        publisher._client = client
+        publisher._connected = True
+        await publisher._handle_server_command("start")
+        task = publisher._stream_task
+        await task
+        assert not state.sendspin_source["stream_requested"]
+        assert not state.sendspin_source["streaming"]
+        assert "cancelled" in state.sendspin_source["error"]
+        assert capture.stopped
     asyncio.run(scenario())
 
 

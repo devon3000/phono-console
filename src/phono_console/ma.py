@@ -96,7 +96,7 @@ class MusicAssistantState:
                 await asyncio.wait_for(self._ready.wait(), timeout=10)
             except Exception:
                 self._listener.cancel()
-                with suppress(asyncio.CancelledError):
+                with suppress(asyncio.CancelledError, Exception):
                     await self._listener
                 self._listener = None
                 raise
@@ -138,7 +138,7 @@ class MusicAssistantState:
         task = self._connection_task
         if task is not None and task.done():
             # _connect_for_status handles and records expected connection failures.
-            with suppress(Exception):
+            with suppress(asyncio.CancelledError, Exception):
                 task.result()
             self._connection_task = None
 
@@ -357,6 +357,18 @@ class MusicAssistantState:
 
     async def stop_players(self, players: Sequence[str]) -> list[str]:
         """Stop playback on the named players/groups."""
+        # A lost control connection must not hold the physical route hostage.
+        try:
+            async with asyncio.timeout(self._play_request_timeout_seconds):
+                return await self._stop_players_once(players)
+        except asyncio.CancelledError as exc:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise  # Real shutdown / caller cancellation must propagate.
+            await self._publish_state(False, "MA cancelled the pending stop request")
+            raise ConnectionError("MA cancelled the pending stop request") from exc
+
+    async def _stop_players_once(self, players: Sequence[str]) -> list[str]:
         await self.invalidate_play_requests()
         await self._ensure_connected()
         assert self._client is not None
@@ -428,14 +440,16 @@ class MusicAssistantState:
     async def close(self) -> None:
         if self._connection_task is not None:
             self._connection_task.cancel()
-            with suppress(asyncio.CancelledError):
+            with suppress(asyncio.CancelledError, Exception):
                 await self._connection_task
             self._connection_task = None
         if self._client is not None:
-            await self._client.disconnect()
+            with suppress(Exception):
+                async with asyncio.timeout(3):
+                    await self._client.disconnect()
         if self._listener is not None:
             self._listener.cancel()
-            with suppress(asyncio.CancelledError):
+            with suppress(asyncio.CancelledError, Exception):
                 await self._listener
         self._listener = None
         await self._publish_state(False)

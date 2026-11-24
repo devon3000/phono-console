@@ -234,8 +234,8 @@ class SendspinSourcePublisher:
         # rebuilds a group. Preserve their wire order so cleanup for an older
         # stop cannot race a newer start and invalidate its capture session.
         self._command_lock = asyncio.Lock()
+        self._connection_generation = 0
         self._stream_requested = False
-        self._stream_retry_task: asyncio.Task[None] | None = None
         self._stream_error: str | None = None
         self._selected_source = Source.PHONO
         self._distribution_enabled = True
@@ -337,15 +337,16 @@ class SendspinSourcePublisher:
             raise ValueError(f"source is not publishable: {source.value}")
         if source is self._selected_source:
             return
-        was_requested = self._stream_requested
-        await self._stop_streaming()
-        self._selected_source = source
-        self._reset_stream_activity()
-        self._stream_requested = was_requested
-        await self.events.emit("sendspin_source_selected", {"source": source.value})
-        if was_requested:
-            await self._start_streaming()
-        await self._publish_state()
+        async with self._command_lock:
+            if source is self._selected_source:
+                return
+            await self._stop_streaming()
+            self._selected_source = source
+            self._reset_stream_activity()
+            await self.events.emit("sendspin_source_selected", {"source": source.value})
+            # Ending a capture ends server admission. Output intent survives
+            # elsewhere; only a fresh MA source.start may open the next one.
+            await self._publish_state()
 
     async def _default_client_factory(self) -> object:
         from aiosendspin.client import PairingSupport, SendspinClient
@@ -436,18 +437,22 @@ class SendspinSourcePublisher:
             streaming=self._streaming,
         )
 
-    def _on_server_command(self, payload: object) -> None:
+    def _on_server_command(self, payload: object, generation: int | None = None) -> None:
         source = getattr(payload, "source", None)
         if source is None:
             return
         loop = asyncio.get_running_loop()
         if source.command == "start":
-            loop.create_task(self._handle_server_command("start"))
+            loop.create_task(self._handle_server_command("start", generation))
         elif source.command == "stop":
-            loop.create_task(self._handle_server_command("stop"))
+            loop.create_task(self._handle_server_command("stop", generation))
 
-    async def _handle_server_command(self, command: str) -> None:
+    async def _handle_server_command(self, command: str, generation: int | None = None) -> None:
         async with self._command_lock:
+            if generation is not None and (
+                generation != self._connection_generation or self._client is None
+            ):
+                return
             await self.events.emit("sendspin_source_command", {"command": command})
             distribution_allowed = bool(
                 self._distribution_enabled
@@ -516,13 +521,15 @@ class SendspinSourcePublisher:
                 await self._await_time_sync(client)
                 capture = client.create_source_capture(capture_format)
                 await capture.start()
-            except Exception as exc:
-                self._stream_error = str(exc)
+            except (Exception, asyncio.CancelledError) as exc:
+                if isinstance(exc, asyncio.CancelledError) and asyncio.current_task().cancelling():
+                    raise
+                self._stream_error = str(exc) or "source start response cancelled by connection"
                 await self.events.emit(
-                    "sendspin_source_stream_failed", {"error": str(exc)}
+                    "sendspin_source_stream_failed", {"error": self._stream_error}
                 )
+                self._stream_requested = False
                 await self._publish_state()
-                self._schedule_stream_retry()
                 return
             self._stream_error = None
             self._streaming = True
@@ -621,20 +628,24 @@ class SendspinSourcePublisher:
                 captured_frames += frames
             error = "PCM capture ended unexpectedly"
         except asyncio.CancelledError:
-            raise
+            if asyncio.current_task().cancelling():
+                raise
+            error = "source capture response cancelled by connection"
         except Exception as exc:
             error = str(exc)
         finally:
             with suppress(Exception):
                 await stream.aclose()
-            with suppress(Exception):
-                await capture.stop()
+            with suppress(Exception, asyncio.CancelledError):
+                async with asyncio.timeout(SOURCE_FEED_TIMEOUT_SECONDS):
+                    await capture.stop()
             if self._stream_task is asyncio.current_task():
                 self._stream_task = None
                 was_streaming = self._streaming
                 self._streaming = False
                 if error is not None and self._stream_requested:
                     self._stream_error = error
+                    self._stream_requested = False
                     await self.events.emit(
                         "sendspin_source_stream_failed", {"error": error}
                     )
@@ -642,8 +653,6 @@ class SendspinSourcePublisher:
                     self._reset_stream_activity()
                     await self.events.emit("sendspin_source_stream_stopped", {})
                     await self._publish_state()
-                if error is not None and self._stream_requested:
-                    self._schedule_stream_retry()
 
     async def _feed(
         self, capture: object, pcm: bytes, timestamp_us: int
@@ -693,43 +702,8 @@ class SendspinSourcePublisher:
             )
             await self._publish_state()
 
-    def _schedule_stream_retry(self) -> None:
-        if (
-            not self._stream_requested
-            or not self._connected
-            or (
-                self._stream_retry_task is not None
-                and not self._stream_retry_task.done()
-            )
-        ):
-            return
-        self._stream_retry_task = asyncio.create_task(
-            self._retry_stream(), name="sendspin-source-capture-retry"
-        )
-
-    async def _retry_stream(self) -> None:
-        try:
-            while self._stream_requested and self._connected:
-                await asyncio.sleep(self.reconnect_seconds)
-                if not self._stream_requested or not self._connected:
-                    break
-                await self._start_streaming()
-                if self._stream_task is not None:
-                    break
-        except asyncio.CancelledError:
-            raise
-        finally:
-            if self._stream_retry_task is asyncio.current_task():
-                self._stream_retry_task = None
-
     async def _stop_streaming(self) -> None:
         self._stream_requested = False
-        retry_task = self._stream_retry_task
-        self._stream_retry_task = None
-        if retry_task is not None:
-            retry_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await retry_task
         async with self._stream_lock:
             task = self._stream_task
             self._stream_task = None
@@ -875,9 +849,11 @@ class SendspinSourcePublisher:
                     await self._wait_retry(stop)
                     continue
                 self._client = client
+                self._connection_generation += 1
+                generation = self._connection_generation
                 disconnected = asyncio.Event()
                 remove_command = client.add_server_command_listener(
-                    self._on_server_command
+                    lambda payload, generation=generation: self._on_server_command(payload, generation)
                 )
                 remove_disconnect = client.add_disconnect_listener(disconnected.set)
                 try:
@@ -907,7 +883,9 @@ class SendspinSourcePublisher:
                     drop_task.cancel()
 
                 self._connected = False
-                await self._stop_streaming()
+                self._connection_generation += 1
+                async with self._command_lock:
+                    await self._stop_streaming()
                 await self._teardown(client, remove_command, remove_disconnect)
                 await self.events.emit("sendspin_source_disconnected", {})
                 await self._publish_state()

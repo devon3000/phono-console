@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +20,33 @@ from phono_console.simulation import (
 def config():
     path = Path(__file__).parents[1] / "config" / "phono-console.example.toml"
     return load_config(path)
+
+
+def test_controller_survives_cancelled_remote_future_but_honors_task_cancel():
+    async def scenario():
+        stop = asyncio.Event()
+        subject = Controller(config(), SimulatedLevelMonitor(), SimulatedMusicAssistant(), SimulatedAudioRouter(), SimulatedEventSink())
+        ticks = []
+        async def tick(now):
+            ticks.append(now)
+            if len(ticks) == 1:
+                future = asyncio.get_running_loop().create_future()
+                future.cancel()
+                await future
+            stop.set()
+        subject.tick = tick
+        await asyncio.wait_for(subject.run(stop), timeout=1)
+        assert len(ticks) == 2
+        assert not asyncio.current_task().cancelling()
+        async def blocked(now):
+            await asyncio.Event().wait()
+        subject.tick = blocked
+        task = asyncio.create_task(subject.run(asyncio.Event()))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(scenario())
 
 
 def test_controller_applies_only_changed_routes() -> None:

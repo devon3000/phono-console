@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 from dataclasses import dataclass
 from contextlib import suppress
 
@@ -49,6 +50,70 @@ class FakeClient:
     def __init__(self):
         self.players = FakePlayers([FakePlayer()])
         self.player_queues = FakePlayerQueues()
+
+
+def test_cancelled_response_future_is_connection_failure_not_shutdown():
+    async def scenario():
+        state = MusicAssistantState("http://ma", None, "Phono Console", SimulatedEventSink())
+        state._client = client = FakeClient()
+        state._ensure_connected = _noop
+        async def cancelled(queue_id):
+            response = asyncio.get_running_loop().create_future()
+            response.cancel()
+            await response
+        client.player_queues.stop = cancelled
+        with pytest.raises(ConnectionError, match="cancelled"):
+            await state.stop_players(["Phono Console"])
+        assert asyncio.current_task().cancelling() == 0
+    asyncio.run(scenario())
+
+
+def test_stop_is_bounded_but_real_caller_cancellation_propagates():
+    async def scenario():
+        state = MusicAssistantState("http://ma", None, "Phono Console", SimulatedEventSink(), play_request_timeout_seconds=0.01)
+        state._client = client = FakeClient()
+        state._ensure_connected = _noop
+        async def hang(queue_id):
+            await asyncio.Event().wait()
+        client.player_queues.stop = hang
+        with pytest.raises(TimeoutError):
+            await state.stop_players(["Phono Console"])
+        state._play_request_timeout_seconds = 5
+        task = asyncio.create_task(state.stop_players(["Phono Console"]))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(scenario())
+
+
+def test_cleanup_tolerates_already_failed_listener_and_disconnect():
+    async def scenario():
+        state = MusicAssistantState("http://ma", None, "Phono Console", SimulatedEventSink())
+        async def failed():
+            raise ConnectionError("connection already lost")
+        state._listener = asyncio.create_task(failed())
+        await asyncio.sleep(0)
+        state._client = FakeClient()
+        state._client.disconnect = failed
+        await state.close()
+        assert state._listener is None
+    asyncio.run(scenario())
+
+
+def test_cancelled_connection_attempt_does_not_block_the_next_attempt():
+    async def scenario():
+        state = MusicAssistantState("http://ma", None, "Phono Console", SimulatedEventSink())
+        state._ensure_connected = _noop
+        old = asyncio.create_task(asyncio.sleep(30))
+        old.cancel()
+        await asyncio.gather(old, return_exceptions=True)
+        state._connection_task = old
+        assert not await state.console_is_playing()
+        assert state._connection_task is not old
+        await asyncio.sleep(0)
+        await state.close()
+    asyncio.run(scenario())
 
 
 def test_player_can_be_selected_by_name_or_id() -> None:

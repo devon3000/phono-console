@@ -351,6 +351,27 @@ class Controller:
         can_start_distribution = bool(
             selected_source is not Source.BLUETOOTH or bluetooth_pcm_ready
         )
+        distribution_released = False
+        preserve_bluetooth_return = bool(
+            self.route is Route.DISTRIBUTED_BLUETOOTH
+            and bluetooth_active
+            and selected_source is Source.BLUETOOTH
+            and capable
+            and stream_healthy
+        )
+        if (
+            not available
+            and not preserve_bluetooth_return
+            and self.route in {Route.DISTRIBUTED_PHONO, Route.DISTRIBUTED_BLUETOOTH}
+            and self.release_distribution is not None
+        ):
+            # End the old session BEFORE preparing its replacement. Otherwise
+            # the later distributed->local cleanup stops the newly opened input.
+            distribution_released = True
+            try:
+                await self.release_distribution()
+            except Exception as exc:
+                await self._set_component("distribution", "degraded", str(exc))
         if (
             distribution_required
             and selected_source is not Source.NONE
@@ -482,7 +503,7 @@ class Controller:
             Route.DISTRIBUTED_BLUETOOTH,
         }
         if was_distributed and not will_be_distributed:
-            if self.release_distribution is not None:
+            if self.release_distribution is not None and not distribution_released:
                 try:
                     await self.release_distribution()
                 except Exception as exc:
@@ -706,6 +727,14 @@ class Controller:
                 started = time.monotonic()
                 try:
                     await self.tick(started)
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        raise
+                    # A remote library can cancel a command's response Future
+                    # on disconnect without cancelling this controller Task.
+                    await self.event_sink.emit(
+                        "controller_tick_failed", {"error": "remote command cancelled"}
+                    )
                 except Exception as exc:
                     LOGGER.warning("controller tick failed: %s", exc)
                     await self.event_sink.emit(
